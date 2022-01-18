@@ -107,23 +107,98 @@ void closedLoopControl()
 	outfile.close();
 }
 
+MatrixPath pathGenerator(const Eigen::Vector3d& initPose, const Eigen::Vector3d& finalPose)
+{
+	Eigen::Matrix<double, 2, 3> parabolic(Eigen::Matrix<double, 2, 3>::Zero()); // order: p, h, k
+	parabolic(0, 0) = initPose(1) * initPose(1) / 4 / (initPose(0) - initPose(1) / tan(finalPose(2)));
+	parabolic(0, 1) = -parabolic(0, 0) / tan(finalPose(2)) / tan(finalPose(2));
+	parabolic(0, 2) = -2 * parabolic(0, 0) / tan(finalPose(2));
+	parabolic(1, 0) = initPose(0) * initPose(0) / 4 / (initPose(1) - initPose(0)*tan(finalPose(2)));
+	parabolic(1, 1) = -2 * parabolic(1, 0)*tan(finalPose(2));
+	parabolic(1, 2) = -parabolic(1, 0)*tan(finalPose(2))*tan(finalPose(2));
+
+	const int angleNum=13;
+	Eigen::VectorXd initOri(angleNum);
+	initOri << initPose(2) - 60 * EIGEN_PI / 180, initPose(2) - 50 * EIGEN_PI / 180, initPose(2) - 40 * EIGEN_PI / 180,
+		initPose(2) - 30 * EIGEN_PI / 180, initPose(2) - 20 * EIGEN_PI / 180, initPose(2) - 10 * EIGEN_PI / 180,
+		initPose(2) - 0 * EIGEN_PI / 180, initPose(2) + 10 * EIGEN_PI / 180, initPose(2) + 20 * EIGEN_PI / 180,
+		initPose(2) + 30 * EIGEN_PI / 180, initPose(2) + 40 * EIGEN_PI / 180, initPose(2) + 50 * EIGEN_PI / 180,
+		initPose(2) + 60 * EIGEN_PI / 180;
+	Eigen::MatrixXd cubic1(angleNum, 4);
+	Eigen::MatrixXd cubic2(angleNum, 4);
+	Eigen::VectorXi cubic1State(angleNum); // 0: good; 1: sigular; 2:wrong direction.
+	Eigen::VectorXi cubic2State(angleNum);
+	cubic1State = Eigen::Matrix<int, angleNum, 1>::Zero();
+	cubic2State = Eigen::Matrix<int, angleNum, 1>::Zero();
+	for (int i = 0; i < angleNum; i++)
+	{
+		if (abs(initOri(i) - EIGEN_PI / 2) < 0.001 || abs(initOri(i) + EIGEN_PI / 2) < 0.001 || abs(initPose(0)) < 0.001) // other criterions are discussed later.
+			cubic1State(i) = 1;
+		cubic1(i, 0) = 0;
+		cubic1(i, 1) = tan(finalPose(2));
+		cubic1(i, 2) = (3 * initPose(1) - initPose(0)*(tan(initOri(i)) + 2 * tan(finalPose(2)))) / initPose(0) / initPose(0);
+		cubic1(i, 3) = (initPose(0)*(tan(initOri(i)) + tan(finalPose(2))) - 2 * initPose(1)) / initPose(0) / initPose(0) / initPose(0);
+		if (abs(initOri(i)) < 0.001 || abs(abs(initOri(i)) - EIGEN_PI) < 0.001 || abs(initPose(1)) < 0.001)
+			cubic2State(i) = 1;
+		cubic2(i, 0) = 0;
+		cubic2(i, 1) = 1 / tan(finalPose(2));
+		cubic2(i, 2) = (3 * initPose(0) - initPose(1)*(1 / tan(initOri(i)) + 2 / tan(finalPose(2)))) / initPose(1) / initPose(1);
+		cubic2(i, 3) = (initPose(1)*(1 / tan(initOri(i)) + 1 / tan(finalPose(2))) - 2 * initPose(0)) / initPose(1) / initPose(1) / initPose(1);
+	}
+
+	MatrixPath pathOut;
+	int pathId = 12;
+
+	for (int i = 0; i < 20; i++)
+	{
+		double z2 = initPose(1) / 2 * (1 + cos(EIGEN_PI*i / 19));
+		pathOut(i, 1) = z2;
+		pathOut(i, 0) = (z2 - parabolic(0, 2))*(z2 - parabolic(0, 2)) / 4 / parabolic(0, 0) + parabolic(0, 1);
+	}
+
+	//for (int i = 0; i < 20; i++)
+	//{
+	//	double z1 = initPose(0) / 2 * (1 + cos(EIGEN_PI*i / 19));
+	//	pathOut(i, 0) = z1;
+	//	pathOut(i, 1) = (z1 - parabolic(1, 1))*(z1 - parabolic(1, 1)) / 4 / parabolic(1, 0) + parabolic(1, 2);
+	//}
+
+	//for (int i = 0; i < 20; i++)
+	//{
+	//	double z1 = initPose(0) / 2 * (1 + cos(EIGEN_PI*i / 19));
+	//	pathOut(i, 0) = z1;
+	//	pathOut(i, 1) = cubic1(pathId, 0) + cubic1(pathId, 1)*z1 + cubic1(pathId, 2)*z1*z1 + cubic1(pathId, 3)*z1*z1*z1;
+	//}
+
+	//for (int i = 0; i < 20; i++)
+	//{
+	//	double z2 = initPose(1) / 2 * (1 + cos(EIGEN_PI*i / 19));
+	//	pathOut(i, 1) = z2;
+	//	pathOut(i, 0) = cubic2(pathId, 0) + cubic2(pathId, 1)*z2 + cubic2(pathId, 2)*z2*z2 + cubic2(pathId, 3)*z2*z2*z2;
+	//}
+	return pathOut;
+}
+
 
 int main()
 {
 	/*forwardControl();*/
 
+	Eigen::Vector3d cartIniPos(-1000, 1500, 0);
+	Eigen::Vector3d tarPos(0, 0, -80 * EIGEN_PI / 180);
+	MatrixPath desiredPath = pathGenerator(cartIniPos, tarPos);
+	//std::cout << desiredPath << std::endl;
 	CartPara cartTest;
-	cartTest.wheelsRadius = 0.15;
-	cartTest.wheelsDistance = 0.4;
-	cartTest.linVelLim = 1.2;
-	cartTest.linAccLim = 0.6;
-	cartTest.angVelLim = 1.5;
-	cartTest.angAccLim = 0.8;
-	cartTest.communFreq = 10;
+	cartTest.wheelsRadius = 50; // r=50mm
+	cartTest.wheelsDistance = 560; // l=560mm
+	cartTest.linVelLim = 50; // vlim=50mm/s
+	cartTest.linAccLim = 20; // alim=20mm/s^2
+	cartTest.angVelLim = 0.1; // theta'=0.1rad/s
+	cartTest.angAccLim = 0.04; // theta''=0.04rad/s^2
+	cartTest.communFreq = 10; // 10Hz
 	MotionController mC(cartTest);
-	Eigen::Vector3d cartIniPos(0, 0, -EIGEN_PI/6);
-	Eigen::Vector3d tarPos(14, 5, 0);
-	MatrixPath desiredPath;
+
+	/*MatrixPath desiredPath;
 	desiredPath << 0, 0,
 		1, 0,
 		2, 0,
@@ -143,8 +218,9 @@ int main()
 		11, 5,
 		12, 5,
 		13, 5,
-		14, 5;
-	mC.generatePath(desiredPath, cartIniPos, tarPos);
+		14, 5;*/
+	MatrixPath factualPath = mC.fromDesired2FactualPath(desiredPath, cartIniPos, tarPos);
+
 
 	return 0;
 }

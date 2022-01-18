@@ -33,7 +33,7 @@ public:
 
 	Eigen::Vector3d fromWheelsVel2CartVel3(const Eigen::Vector3d& cartCurrPosIn, const Eigen::Vector2d& wheelsVelIn) const;
 
-	MatrixPath generatePath(const MatrixPath& desiredPath, const Eigen::Vector3d& iniPosIn, const Eigen::Vector3d& tarPosIn) const; // every path is determined by 20 points.
+	MatrixPath fromDesired2FactualPath(const MatrixPath& desiredPath, const Eigen::Vector3d& iniPosIn, const Eigen::Vector3d& tarPosIn) const; // every path is determined by 20 points.
 
 	inline void updateCartIniPos(const Eigen::Vector3d& cartIniPosIn) { cartIniPos = cartIniPosIn; cartCurrPos = cartIniPosIn; };
 
