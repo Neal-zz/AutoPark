@@ -1,7 +1,11 @@
 #include "MotionController.h"
+#include "ComCaspTest.h"
+
 #include <Eigen\Dense>
 #include <iostream>
 #include <fstream>
+#include <conio.h>
+#include <opencv2/opencv.hpp>
 
 
 // input cartVel, get the motion trace.
@@ -179,47 +183,81 @@ MatrixPath pathGenerator(const Eigen::Vector3d& initPose, const Eigen::Vector3d&
 	return pathOut;
 }
 
+void comCaspLensTest()
+{
+	// ComCaspTest
+	int ch;
+	ComCaspTest casp1;
+	casp1.comConnect();
+	casp1.setFocusNum(40);
+	double caspFocus = 0;
+	while (1 == 1)
+	{
+		if (_kbhit()){
+			ch = _getch();
+			if (ch == 81) // q = +
+			{
+				caspFocus = casp1.getFocusNum();
+				std::cout << "focus= " << caspFocus << std::endl;
+				caspFocus++;
+				if (caspFocus <= 69) { casp1.setFocusNum(caspFocus); }
+			}
+			else if (ch == 65) // a = -
+			{
+				caspFocus = casp1.getFocusNum();
+				std::cout << "focus= " << caspFocus << std::endl;
+				caspFocus--;
+				if (caspFocus >= 25) { casp1.setFocusNum(caspFocus); }
+			}
+			else if (ch == 27){ break; }
+		}
+	}
+	system("pause");
+}
 
 int main()
 {
 	/*forwardControl();*/
 
-	Eigen::Vector3d cartIniPos(-1000, 1500, 0);
-	Eigen::Vector3d tarPos(0, 0, -80 * EIGEN_PI / 180);
-	MatrixPath desiredPath = pathGenerator(cartIniPos, tarPos);
-	//std::cout << desiredPath << std::endl;
-	CartPara cartTest;
-	cartTest.wheelsRadius = 50; // r=50mm
-	cartTest.wheelsDistance = 560; // l=560mm
-	cartTest.linVelLim = 50; // vlim=50mm/s
-	cartTest.linAccLim = 20; // alim=20mm/s^2
-	cartTest.angVelLim = 0.1; // theta'=0.1rad/s
-	cartTest.angAccLim = 0.04; // theta''=0.04rad/s^2
-	cartTest.communFreq = 10; // 10Hz
-	MotionController mC(cartTest);
 
-	/*MatrixPath desiredPath;
-	desiredPath << 0, 0,
-		1, 0,
-		2, 0,
-		3, 0,
-		4, 0,
-		5, 0,
-		6, 0,
-		7, 0,
-		7, 1,
-		7, 2,
-		7, 3,
-		7, 4,
-		7, 5,
-		8, 5,
-		9, 5,
-		10, 5,
-		11, 5,
-		12, 5,
-		13, 5,
-		14, 5;*/
-	MatrixPath factualPath = mC.fromDesired2FactualPath(desiredPath, cartIniPos, tarPos);
+
+	//from desired path to factual path
+	//Eigen::Vector3d cartIniPos(-1000, 1500, 0);
+	//Eigen::Vector3d tarPos(0, 0, -80 * EIGEN_PI / 180);
+	//MatrixPath desiredPath = pathGenerator(cartIniPos, tarPos);
+	////std::cout << desiredPath << std::endl;
+	//CartPara cartTest;
+	//cartTest.wheelsRadius = 50; // r=50mm
+	//cartTest.wheelsDistance = 560; // l=560mm
+	//cartTest.linVelLim = 50; // vlim=50mm/s
+	//cartTest.linAccLim = 20; // alim=20mm/s^2
+	//cartTest.angVelLim = 0.1; // theta'=0.1rad/s
+	//cartTest.angAccLim = 0.04; // theta''=0.04rad/s^2
+	//cartTest.communFreq = 10; // 10Hz
+	//MotionController mC(cartTest);
+	///*MatrixPath desiredPath;
+	//desiredPath << 0, 0,
+	//	1, 0,
+	//	2, 0,
+	//	3, 0,
+	//	4, 0,
+	//	5, 0,
+	//	6, 0,
+	//	7, 0,
+	//	7, 1,
+	//	7, 2,
+	//	7, 3,
+	//	7, 4,
+	//	7, 5,
+	//	8, 5,
+	//	9, 5,
+	//	10, 5,
+	//	11, 5,
+	//	12, 5,
+	//	13, 5,
+	//	14, 5;*/
+	//MatrixPath factualPath = mC.fromDesired2FactualPath(desiredPath, cartIniPos, tarPos);
+
 
 
 	return 0;
