@@ -12,7 +12,6 @@ GxCamTest::GxCamTest()
 	, m_strSavePath("")
 	, m_strBalanceWhiteAutoMode("Off")
 	, m_pSampleCaptureEventHandle(NULL)
-	// image map
 	, m_bCheckSaveBmp(FALSE)
 	, m_dEditShutterValue(20000)
 	, m_dEditGainValue(0)
