@@ -8,7 +8,23 @@
 #include <fstream>
 #include <conio.h>
 #include <opencv2/opencv.hpp>
+#include <chrono>   
+#include <string>
 
+/*timer*/
+auto tic = []()
+{
+	return std::chrono::system_clock::now();
+};
+
+auto toc = [](std::chrono::system_clock::time_point start, const std::string& name)
+{
+	std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
+	std::chrono::duration<double, std::milli> duration_ms = end - start;
+	std::cout << name << '\t' << duration_ms.count() << "ms" << std::endl;
+
+	return;
+};
 
 // input cartVel, get the motion trace.
 void forwardControl()
@@ -259,18 +275,35 @@ void fromDesired2FactualTest()
 
 int main()
 {
+	//cv::Mat image = cv::Mat(400, 600, CV_8UC1); //¿í400£¬³¤600
+	//for (int input_y = 50; input_y < 100; input_y++) {
+	//	for (int input_x = 500; input_x < 550; input_x++) {
+	//		image.ptr<uchar>(input_y)[input_x]=1.0;
+	//	}
+	//}
+	//cv::imshow("", image);
+	//cv::waitKey(0);
 
-	cv::Mat img = cv::imread("3.jpg");
+
+	auto t1 = tic();
+
+	cv::Mat img = cv::imread("1.jpg");
 	if (!img.data)
 	{
 		printf(" No image data \n ");
 		return 0;
 	}
 	cv::cvtColor(img, img, cv::COLOR_BGR2GRAY);
-	img.convertTo(img, CV_32FC1);
+	img.convertTo(img, CV_32FC1, 1.0 / 255.0);
+
 	Detector detector(img.size());
 	Corners corners = detector.process(img);
-	detector.showResult("cor", corners, img);
+
+	toc(t1, "t1");
+
+	cv::Mat imgColor;
+	cv::cvtColor(img, imgColor, cv::COLOR_GRAY2BGR);
+	detector.showResult("cor", corners, imgColor);
 
 	return 0;
 }
