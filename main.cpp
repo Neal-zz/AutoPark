@@ -2,6 +2,7 @@
 #include "ComCaspTest.h"
 #include "GxCamTest.h"
 #include "Detector.h"
+#include "Optimizator.h"
 
 #include <Eigen\Dense>
 #include <iostream>
@@ -273,25 +274,14 @@ void fromDesired2FactualTest()
 	return;
 }
 
-int main()
-{
-	//cv::Mat image = cv::Mat(400, 600, CV_8UC1); //¿í400£¬³¤600
-	//for (int input_y = 50; input_y < 100; input_y++) {
-	//	for (int input_x = 500; input_x < 550; input_x++) {
-	//		image.ptr<uchar>(input_y)[input_x]=1.0;
-	//	}
-	//}
-	//cv::imshow("", image);
-	//cv::waitKey(0);
-
-
+void testCornerDetect() {
 	auto t1 = tic();
 
 	cv::Mat img = cv::imread("1.jpg");
 	if (!img.data)
 	{
 		printf(" No image data \n ");
-		return 0;
+		return;
 	}
 	cv::cvtColor(img, img, cv::COLOR_BGR2GRAY);
 	img.convertTo(img, CV_32FC1, 1.0 / 255.0);
@@ -304,6 +294,24 @@ int main()
 	cv::Mat imgColor;
 	cv::cvtColor(img, imgColor, cv::COLOR_GRAY2BGR);
 	detector.showResult("cor", corners, imgColor);
+	return;
+}
+
+int main()
+{
+	
+	double R_now[9] = { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+	double t_now[3] = { 1, 1, 1 };
+	double E[9];
+	[&R_now, &t_now](double E[9]) {
+		for (int i = 0; i < 9; ++i)
+			E[i] = R_now[i];
+
+		E[2] = t_now[0];
+		E[5] = t_now[1];
+		E[8] = t_now[2];
+	}(E);
+	std::cout << E[0] << E[1] << E[2] << E[3] << E[4] << E[5] << E[6] << E[7] << E[8] << std::endl;
 
 	return 0;
 }
