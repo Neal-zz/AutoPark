@@ -277,14 +277,14 @@ void fromDesired2FactualTest()
 void testCornerDetect() {
 	auto t1 = tic();
 
-	cv::Mat img = cv::imread("1.jpg");
+	cv::Mat img = cv::imread("markerFar5.bmp");  // CV_8UC3
 	if (!img.data)
 	{
 		printf(" No image data \n ");
 		return;
 	}
-	cv::cvtColor(img, img, cv::COLOR_BGR2GRAY);
-	img.convertTo(img, CV_32FC1, 1.0 / 255.0);
+	cv::cvtColor(img, img, cv::COLOR_BGR2GRAY); // CV_8UC1
+	img.convertTo(img, CV_32FC1, 1.0 / 255.0); // CV_32FC1
 
 	Detector detector(img.size());
 	Corners corners = detector.process(img);
@@ -292,26 +292,16 @@ void testCornerDetect() {
 	toc(t1, "t1");
 
 	cv::Mat imgColor;
+	
 	cv::cvtColor(img, imgColor, cv::COLOR_GRAY2BGR);
+	imgColor.convertTo(imgColor, CV_8UC3, 255.0);
 	detector.showResult("cor", corners, imgColor);
 	return;
 }
 
 int main()
 {
-	
-	double R_now[9] = { 1, 2, 3, 4, 5, 6, 7, 8, 9 };
-	double t_now[3] = { 1, 1, 1 };
-	double E[9];
-	[&R_now, &t_now](double E[9]) {
-		for (int i = 0; i < 9; ++i)
-			E[i] = R_now[i];
-
-		E[2] = t_now[0];
-		E[5] = t_now[1];
-		E[8] = t_now[2];
-	}(E);
-	std::cout << E[0] << E[1] << E[2] << E[3] << E[4] << E[5] << E[6] << E[7] << E[8] << std::endl;
+	testCornerDetect();
 
 	return 0;
 }

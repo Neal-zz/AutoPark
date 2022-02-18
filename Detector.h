@@ -10,7 +10,7 @@
 
 
 using PixelType = float;
-const int MatType = CV_32FC1; // 图像访问都是基于这一格式，不能随意改变。
+const int MatType = CV_32FC1; // image format, don't change randomly.
 
 struct Maxima
 {
@@ -58,7 +58,20 @@ struct DetectRectangle
 	cv::Range range_y;
 };
 
+struct QRTemplate
+{
+	QRTemplate()
+		: corner1(cv::Point_<PixelType>(0, 0)), corner2(cv::Point_<PixelType>(0, 0))
+		, corner3(cv::Point_<PixelType>(0, 0)), corner4(cv::Point_<PixelType>(0, 0))
+		, id(-1)
+	{}
 
+	Corner corner1;
+	Corner corner2;
+	Corner corner3;
+	Corner corner4;
+	int id; // 0-15 is valid.
+};
 
 
 class Detector
@@ -74,7 +87,7 @@ private:
 	bool detectCorners(const cv::Mat& image, CornersTemplate& corners_on_marker);
 
 	void secondDerivCornerMetric(cv::Mat& I_angle, cv::Mat& I_weight, cv::Mat& cmax);
-	Maximas nonMaximumSuppression(const cv::Mat& img, int n = 8, int margin = 8, PixelType tau = 0.06f); // tau is the threshold.
+	Maximas nonMaximumSuppression(const cv::Mat& img, int n = 8, int margin = 8, PixelType tau = 0.2f); // tau is the threshold.
 	bool detectCornersOnMarker(const Maximas& corners, CornersTemplate& corners_selected);
 	Corner subPixelLocation(const cv::Point& point);
 	void findFirstSecondCorners(const cv::Point& point, CornerTemplate& corner_first, CornerTemplate& corner_second, int& dir);

@@ -103,7 +103,7 @@ struct ReprojectionError
 		, A_cam(A_cam)
 	{
 	}
-	
+
 	template <typename T>
 	bool operator()(const T* const pose, T* residuals) const
 	{
@@ -200,5 +200,3 @@ void Optimizator::opti(const Eigen::Matrix3d& R, const Eigen::Vector3d& t, const
 	cost = summary.final_cost;
 	return;
 }
-
-

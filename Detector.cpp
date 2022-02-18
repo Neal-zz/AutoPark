@@ -6,11 +6,12 @@ Detector::Detector(const cv::Size& size)
 	, SIGMA(2)
 	, HALF_PATCH_SIZE(3)
 	, PATCH_X(calcPatchX())
-	, WIDTH_MIN(10)
+	, WIDTH_MIN(20)
 	, CORR_THRESHOLD(0.7f)
 	, rect({ cv::Range(0, size.width), cv::Range(0, size.height) })
 {
 	initWidth = WIDTH_MIN;
+
 }
 
 Corners Detector::process(const cv::Mat& image)
@@ -20,35 +21,35 @@ Corners Detector::process(const cv::Mat& image)
 	bool is_vaild = detectCorners(image_roi, corners); // corners: all finded corners.
 
 	// Then we update the ROI.
-	if (is_vaild)
-	{
-		for (CornerTemplate& corner : corners)
-			corner.point += Corner(rect.range_x.start, rect.range_y.start);
+	//if (is_vaild)
+	//{
+	//	for (CornerTemplate& corner : corners)
+	//		corner.point += Corner(rect.range_x.start, rect.range_y.start);
 
-		PixelType width_sum = 0;
-		Corner point_sum(0, 0);
-		for (const CornerTemplate& corner : corners)
-		{
-			point_sum += corner.point;
-			width_sum += corner.width;
-		}
-		PixelType px_avg = point_sum.x / corners.size();
-		PixelType py_avg = point_sum.y / corners.size();
-		PixelType width_avg = width_sum / corners.size();
+	//	PixelType width_sum = 0;
+	//	Corner point_sum(0, 0);
+	//	for (const CornerTemplate& corner : corners)
+	//	{
+	//		point_sum += corner.point;
+	//		width_sum += corner.width;
+	//	}
+	//	PixelType px_avg = point_sum.x / corners.size();
+	//	PixelType py_avg = point_sum.y / corners.size();
+	//	PixelType width_avg = width_sum / corners.size();
 
-		PixelType rect_side = round(width_avg * 20);
-		rect.range_x = cv::Range(
-			std::max(static_cast<int>(px_avg - rect_side / 2), 0),
-			std::min(static_cast<int>(px_avg + rect_side / 2) + 1, image.cols));
-		rect.range_y = cv::Range(
-			std::max(static_cast<int>(py_avg - rect_side / 2), 0),
-			std::min(static_cast<int>(py_avg + rect_side / 2) + 1, image.rows));
-	}
-	else
-	{
-		rect.range_x = cv::Range(0, SIZE.width);
-		rect.range_y = cv::Range(0, SIZE.height);
-	}
+	//	PixelType rect_side = round(width_avg * 20);
+	//	rect.range_x = cv::Range(
+	//		std::max(static_cast<int>(px_avg - rect_side / 2), 0),
+	//		std::min(static_cast<int>(px_avg + rect_side / 2) + 1, image.cols));
+	//	rect.range_y = cv::Range(
+	//		std::max(static_cast<int>(py_avg - rect_side / 2), 0),
+	//		std::min(static_cast<int>(py_avg + rect_side / 2) + 1, image.rows));
+	//}
+	//else
+	//{
+	//	rect.range_x = cv::Range(0, SIZE.width);
+	//	rect.range_y = cv::Range(0, SIZE.height);
+	//}
 
 	Corners res;
 	for (auto&& p : corners)
@@ -59,28 +60,37 @@ Corners Detector::process(const cv::Mat& image)
 
 bool Detector::detectCorners(const cv::Mat& gray_image_in, CornersTemplate& corners_on_marker)
 {
-	//auto t0 = tic();
-	//gray_image = convertToGray(image);
-	//toc(t0);
 	gray_image = gray_image_in;
 
-	//auto t1 = tic();
 	secondDerivCornerMetric(I_angle, I_weight, cmax);
-	//toc(t1);
 
-	//auto t2 = tic();
-	Maximas corners = nonMaximumSuppression(cmax, WIDTH_MIN / 2, WIDTH_MIN);
+	Maximas corners = nonMaximumSuppression(cmax, ceil(initWidth / 2), ceil(initWidth / 2));
 	std::sort(corners.begin(), corners.end(),
 		[](const Maxima& lhs, const Maxima& rhs) { return lhs.val > rhs.val; });
-	//toc(t2);
 
-	/*monitor all the markers detected.*/
+	/*monitor all the corners detected.*/
+	/*monitor all the chessboard corners.*/
 	//corners_on_marker.clear();
-	//for (Maxima& m : corners)
-	//	corners_on_marker.emplace_back(m.corner,WIDTH_MIN);
+	//for (Maxima& m : corners) {
+	//	CornerTemplate corner_first;
+	//	corner_first.point = subPixelLocation(m.corner);
+	//	corner_first.width = initWidth;
+
+	//	PixelType angle1, angle2;
+	//	findEdgeAngles(corner_first.point, angle1, angle2);
+	//	if (abs(angle1) < 1e-7 && abs(angle2) < 1e-7)
+	//		continue;
+
+	//	PixelType template_angle = (angle1 + angle2 - CV_PI / 2) / 2;
+	//	PixelType corr = calcBolicCorrelation(corner_first.point, WIDTH_MIN / 2, template_angle);
+	//	if (corr <= CORR_THRESHOLD)
+	//		continue;
+
+	//	corners_on_marker.emplace_back(m.corner, WIDTH_MIN);
+	//	std::cout << "1" << m.corner.x << " " << m.corner.y << std::endl;
+	//}
 	//bool is_valid = true;
 	
-
 	//auto t3 = tic();
 	bool is_valid = detectCornersOnMarker(corners, corners_on_marker);
 	//toc(t3);
@@ -123,14 +133,14 @@ void Detector::secondDerivCornerMetric(cv::Mat& I_angle, cv::Mat& I_weight, cv::
 
 Maximas Detector::nonMaximumSuppression(const cv::Mat& img, int n, int margin, PixelType tau)
 {
-	// img is cmax. n is WIDTH_MIN/2. margin is WIDTH_MIN.
+	// img is cmax. n is initWidth/2. margin is initWidth/2.
 	int width = img.cols;
 	int height = img.rows;
 
 	Maximas maxima;
-	for (int i = n + margin; i < width - n - margin; i += n + 1)
+	for (int i = margin; i < width - margin - n; i += n + 1)
 	{
-		for (int j = n + margin; j < height - n - margin; j += n + 1)
+		for (int j = margin; j < height - margin - n; j += n + 1)
 		{
 			int max_i = i;
 			int max_j = j;
@@ -154,16 +164,11 @@ Maximas Detector::nonMaximumSuppression(const cv::Mat& img, int n, int margin, P
 				continue;
 
 			bool failed = false;
-			for (int i2 = max_i - n;
-				i2 <= std::min(max_i + n, width - margin - 1);
-				i2++)
+			for (int i2 = max_i - n; i2 <= max_i + n; i2++)
 			{
-				for (int j2 = max_j - n;
-					j2 <= std::min(max_j + n, height - margin - 1);
-					j2++)
+				for (int j2 = max_j - n; j2 <= max_j + n; j2++)
 				{
-					if (img.ptr<PixelType>(j2)[i2] > max_val &&
-						(i2 < i || i2 > i + n || j2 < j || j2 > j + n))
+					if (img.ptr<PixelType>(j2)[i2] > max_val)
 					{
 						failed = true;
 						break;
@@ -189,6 +194,7 @@ bool Detector::detectCornersOnMarker(const Maximas& corners, CornersTemplate& co
 	corners_selected.clear();  // initial.
 	for (const Maxima& p : corners)
 	{
+
 
 		CornerTemplate corner_first, corner_second;
 		int dir=0; // dir means the searching direction.
@@ -232,11 +238,12 @@ bool Detector::detectCornersOnMarker(const Maximas& corners, CornersTemplate& co
 			}
 		}
 		
-		/*只进行一次有效搜索。*/
-		if (corners_selected.size() > 4)
+		/*only search once.*/
+		if (corners_selected.size() > 3)
 		{
 			return true;
 		}
+
 	}
 
 	return false;
@@ -278,7 +285,7 @@ Corner Detector::subPixelLocation(const cv::Point& point)
 void Detector::findFirstSecondCorners(const cv::Point& point, CornerTemplate& corner_first, CornerTemplate& corner_second, int& dir)
 {
 	corner_first.point = subPixelLocation(point);
-	corner_first.width = WIDTH_MIN;
+	corner_first.width = initWidth;
 	corner_second = corner_first;
 
 	PixelType angle1, angle2;
@@ -287,7 +294,7 @@ void Detector::findFirstSecondCorners(const cv::Point& point, CornerTemplate& co
 		return;
 
 	PixelType template_angle = (angle1 + angle2 - CV_PI / 2) / 2;
-	PixelType corr = calcBolicCorrelation(corner_first.point, WIDTH_MIN, template_angle);
+	PixelType corr = calcBolicCorrelation(corner_first.point, WIDTH_MIN/2, template_angle);
 	if (corr <= CORR_THRESHOLD)
 		return;
 
@@ -311,7 +318,7 @@ void Detector::findFirstSecondCorners(const cv::Point& point, CornerTemplate& co
 		std::make_pair(edge_angle2, 1) };
 
 	//const float k_test = 0.8;
-	const int WIDTH_MAX = 60; // TODO: may be changed later.
+	const int WIDTH_MAX = 100; // TODO: may be changed later.
 	for (const std::pair<PixelType, int>& comp : comps)
 	{
 		corner_first.width = initWidth;
@@ -393,18 +400,15 @@ void Detector::edgeOrientation(const cv::Mat& img_angle, const cv::Mat& img_weig
 	{
 		for (int v = 0; v < img_angle.rows; ++v)
 		{
-			PixelType val = [](PixelType angle) { // TODO: bus's marker is horizontal.
+			// img_angle range from: 0 ~ 6.283.
+			PixelType val = [](PixelType angle) {
 				angle += CV_PI / 2;
 				while (angle > CV_PI)
 					angle -= CV_PI;
 				return angle;
 			}(img_angle.ptr<PixelType>(v)[u]);
 
-			auto bin = std::max(
-				std::min(
-				static_cast<int>(floor(val / CV_PI * BIN_NUM)),
-				BIN_NUM - 1),
-				0);
+			auto bin = std::min(static_cast<int>(floor(val / CV_PI * BIN_NUM)), BIN_NUM - 1);
 
 			angle_hist.at(bin) += img_weight.ptr<PixelType>(v)[u];
 		}
@@ -487,11 +491,10 @@ void Detector::edgeOrientation(const cv::Mat& img_angle, const cv::Mat& img_weig
 
 	angle1 = modes.at(0).first * CV_PI / BIN_NUM;
 	angle2 = modes.at(1).first * CV_PI / BIN_NUM;
-	if (angle1 > angle2)
-		std::swap(angle1, angle2);
+	if (abs(angle1-1.57) < abs(angle2-1.57))
+		std::swap(angle1, angle2); // 3.14(vertical) and 1.57(horizontal). TODO: right?
 
-	auto delta_angle = std::min(angle2 - angle1, angle2 - angle1 + static_cast<float>(CV_PI));
-	if (delta_angle <= 0.5f) {
+	if (abs(angle2-angle1) <= 0.5f) {
 		angle1 = 0.0;
 		angle2 = 0.0;
 		return;
@@ -505,7 +508,7 @@ PixelType Detector::calcBolicCorrelation(const Corner& point, const int& width, 
 	int rect_rate = 1; // height/width.
 	PixelType phi = -theta;
 
-	// 双曲正切，这个匿名函数可以生成一个棋盘格角点的模板
+	// hyperbolic tangent function can generate a chessboard corner template.
 	auto fun_hyperbolic_tangent_scaled =
 		[&theta, &phi](PixelType dx, PixelType dy, PixelType alpha, PixelType beta) { // default: alpha = 1.0, beta = 1.0
 		auto fun_hyperbolic_tangent = [&]() {
@@ -645,13 +648,13 @@ cv::Mat Detector::conv2(const cv::Mat &img, const cv::Mat &kernel, const cv::Str
 	}
 
 	cv::Mat flip_kernel;
-	cv::flip(kernel, flip_kernel, -1); // 翻转
+	cv::flip(kernel, flip_kernel, -1); // flip image.
 	cv::Mat source = img;
 	if (mode == "full")
 	{
 		source = cv::Mat();
 		const int additionalRows = flip_kernel.rows - 1, additionalCols = flip_kernel.cols - 1;
-		// 增加边框，准备卷积。
+		// add boundary, prepare for convolution.
 		cv::copyMakeBorder(img, source, (additionalRows + 1) / 2, additionalRows / 2, (additionalCols + 1) / 2, additionalCols / 2, cv::BORDER_CONSTANT, cv::Scalar(0));
 	}
 	cv::Point anchor(flip_kernel.cols - flip_kernel.cols / 2 - 1, flip_kernel.rows - flip_kernel.rows / 2 - 1);
@@ -680,9 +683,10 @@ void Detector::showResult(const cv::String& window_name, const Corners& corners,
 		{
 			cv::circle(image, sc, 3, cv::Scalar(0, 0, 255), -1);
 		}
-		//cv::putText(image, std::to_string(sc.score), sc.corner.point, cv::FONT_HERSHEY_COMPLEX, 0.4, cv::Scalar(0, 255, 255));
+		//std::cout << sc.x << " " << sc.y << std::endl;
 	}
 	cv::imshow(window_name, image);
+	//cv::imwrite("CornerDetect.bmp", image);
 	cv::waitKey(0);
 	// std::cout << "corners size: " << corners.size() << std::endl;
 }
