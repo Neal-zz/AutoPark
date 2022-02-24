@@ -4,17 +4,17 @@ GxCamTest::GxCamTest()
 	: m_bIsOpen(false)
 	, m_bIsSnap(false)
 	, m_bColorFilter(false)
-	, m_bTriggerMode(false)
-	, m_bTriggerSource(false)
-	, m_bTriggerActive(false)
+	, m_bTriggerMode(false) // unabled
+	, m_bTriggerSource(false) // default: Software
+	, m_bTriggerActive(false) // default: FallingEdge
 	, m_bBalanceWhiteAuto(false)
 	, m_bBalanceWhiteRatioSelect(false)
-	, m_strSavePath("")
+	, m_strSavePath("E:\\sjtu\\autoPark\\code\\autoPark\\autoPark\\imgGrasp")
 	, m_strBalanceWhiteAutoMode("Off")
 	, m_pSampleCaptureEventHandle(NULL)
-	, m_bCheckSaveBmp(FALSE)
-	, m_dEditShutterValue(20000)
-	, m_dEditGainValue(0)
+	, m_bCheckSaveBmp(false)
+	, m_dEditShutterValue(20000) // 曝光
+	, m_dEditGainValue(0) // 增益
 	, m_dEditBalanceRatioValue(0)
 	, m_dShutterValueMax(0)
 	, m_dShutterValueMin(0)
@@ -24,12 +24,14 @@ GxCamTest::GxCamTest()
 	, m_dBalanceWhiteRatioMin(0)
 	, m_iImgNum(0)
 {
-
+	if (_access(m_strSavePath.c_str(), 0) == -1) {
+		_mkdir(m_strSavePath.c_str()); // if save path doesn't exist, create one.
+	}
 }
 
 BOOL GxCamTest::openDevice()
 {
-	/*OnInitDialog*/
+	/*OnInitDialog()*/
 
 	try
 	{
@@ -37,16 +39,6 @@ BOOL GxCamTest::openDevice()
 		IGXFactory::GetInstance().Init();
 
 		m_pSampleCaptureEventHandle = new CSampleCaptureEventHandler();
-
-		char strFileName[MAX_PATH] = { 0 };
-		std::string strSavePath = "";
-		size_t nPos = 0;
-
-		GetModuleFileName(NULL, (LPCH)strFileName, MAX_PATH);
-		strSavePath = strFileName;
-		nPos = strSavePath.find_last_of('\\');
-		m_strSavePath = strSavePath.substr(0, nPos);
-		m_strSavePath = m_strSavePath + "\\GxCamImages";
 
 	}
 	catch (CGalaxyException& e)
@@ -74,7 +66,7 @@ BOOL GxCamTest::openDevice()
 
 	}
 
-	/*openDevice*/
+	/*OnBnClickedBtnOpenDevice()*/
 
 	bool bIsDeviceOpen = false;
 	bool bIsStreamOpen = false;
@@ -162,7 +154,7 @@ BOOL GxCamTest::openDevice()
 		//	m_pBitmap = NULL;
 		//}
 
-		std::cout << e.what() << std::endl; 
+		std::cout << e.what() << std::endl;
 		return TRUE;
 	}
 	catch (std::exception& e)
@@ -192,6 +184,8 @@ BOOL GxCamTest::openDevice()
 
 void GxCamTest::closeDevice()
 {
+	/*OnBnClickedBtnCloseDevice()*/
+
 	//失去焦点
 	//SetFocus();
 
@@ -250,58 +244,6 @@ void GxCamTest::closeDevice()
 	/*OnClose*/
 	try
 	{
-		//停止OnTimer
-		//KillTimer(0);
-
-		//判断是否停止采集
-		if (m_bIsSnap)
-		{
-			//发送停采命令
-			m_objFeatureControlPtr->GetCommandFeature("AcquisitionStop")->Execute();
-
-			//关闭流层通道
-			m_objStreamPtr->StopGrab();
-
-			//注销采集回调
-			m_objStreamPtr->UnregisterCaptureCallback();
-
-			m_bIsSnap = false;
-		}
-	}
-	catch (CGalaxyException)
-	{
-		//do noting
-	}
-	catch (std::exception)
-	{
-		//do noting
-	}
-
-	try
-	{
-		//判断是否关闭设备
-		if (m_bIsOpen)
-		{
-			//关闭流对象
-			m_objStreamPtr->Close();
-
-			//关闭设备
-			m_objDevicePtr->Close();
-
-			m_bIsOpen = false;
-		}
-	}
-	catch (CGalaxyException)
-	{
-		//do noting
-	}
-	catch (std::exception)
-	{
-		//do noting
-	}
-
-	try
-	{
 		//释放设备资源
 		IGXFactory::GetInstance().Uninit();
 	}
@@ -330,6 +272,8 @@ void GxCamTest::closeDevice()
 
 void GxCamTest::startSnap()
 {
+	/*OnBnClickedBtnStartSnap()*/
+
 	try
 	{
 		try
@@ -396,23 +340,28 @@ void GxCamTest::stopSnap()
 	}
 }
 
-void GxCamTest::softTrigger()
+//void GxCamTest::softTrigger()
+//{
+//	try
+//	{
+//		// send softTrigger command, and the callback function "m_pSampleCaptureEventHandle" is triggered.
+//		m_objFeatureControlPtr->GetCommandFeature("TriggerSoftware")->Execute();
+//	}
+//	catch (CGalaxyException& e)
+//	{
+//		std::cout << e.what() << std::endl;
+//		return;
+//	}
+//	catch (std::exception& e)
+//	{
+//		std::cout << e.what() << std::endl;
+//		return;
+//	}
+//}
+
+void GxCamTest::setCheckSaveBmp()
 {
-	try
-	{
-		// send softTrigger command, and the callback function "m_pSampleCaptureEventHandle" is triggered.
-		m_objFeatureControlPtr->GetCommandFeature("TriggerSoftware")->Execute();
-	}
-	catch (CGalaxyException& e)
-	{
-		std::cout << e.what() << std::endl;
-		return;
-	}
-	catch (std::exception& e)
-	{
-		std::cout << e.what() << std::endl;
-		return;
-	}
+	m_bCheckSaveBmp = true;
 }
 
 void GxCamTest::SavePicture(CImageDataPointer& objImageDataPointer)
@@ -424,17 +373,19 @@ void GxCamTest::SavePicture(CImageDataPointer& objImageDataPointer)
 		strFilePath = m_strSavePath.c_str();
 		std::string strFileName = ""; // img save name.
 		strFileName = strFilePath + "/" + std::to_string(m_iImgNum) + ".bmp";
-		m_iImgNum += 1;
-
+			
 
 		//保存图像为BMP
 		cv::Mat img;
-		img.create(objImageDataPointer->GetHeight(), objImageDataPointer->GetWidth(), CV_8UC1); // TODO: 8 bit, unsigned, 1 channel.
-		void *pRaw8Buffer = NULL;
-		pRaw8Buffer = objImageDataPointer->ConvertToRaw8(GX_BIT_4_11);
+		img.create(objImageDataPointer->GetHeight(), objImageDataPointer->GetWidth(), CV_8UC1); // 8 bit, unsigned, 3 channel.
+		void* pRaw8Buffer = NULL;
+		pRaw8Buffer = objImageDataPointer->ConvertToRaw8(GX_BIT_0_7);
 		memcpy(img.data, pRaw8Buffer, (objImageDataPointer->GetHeight()) * (objImageDataPointer->GetWidth()));
 		cv::flip(img, img, 0);
-		cv::imwrite(strFileName,img);
+		cv::imwrite(strFileName, img);
+
+		m_iImgNum += 1;
+		m_bCheckSaveBmp = false;
 	}
 	catch (std::exception)
 	{
@@ -447,7 +398,6 @@ void GxCamTest::SavePicture(CImageDataPointer& objImageDataPointer)
 
 void GxCamTest::__InitParam()
 {
-	m_bCheckSaveBmp = true; // save photos.
 
 	bool bBalanceWhiteAutoRead = false;         ///< 白平衡是否可读
 
@@ -455,12 +405,8 @@ void GxCamTest::__InitParam()
 	m_objFeatureControlPtr->GetEnumFeature("AcquisitionMode")->SetValue("Continuous");
 
 	//是否支持触发模式选择
-	m_bTriggerMode = m_objFeatureControlPtr->IsImplemented("TriggerMode");
-	if (m_bTriggerMode)
-	{
-		// set trigger mode: On.
-		m_objFeatureControlPtr->GetEnumFeature("TriggerMode")->SetValue("On");
-	}
+	//m_bTriggerMode = m_objFeatureControlPtr->IsImplemented("TriggerMode");
+	m_objFeatureControlPtr->GetEnumFeature("TriggerMode")->SetValue("Off"); // set trigger mode: Off. In order to get continuous pictures.
 
 	//是否支持Bayer格式
 	m_bColorFilter = m_objFeatureControlPtr->IsImplemented("PixelColorFilter");
@@ -480,7 +426,6 @@ void GxCamTest::__InitParam()
 		// set trigger active: FallingEdge.
 		m_objFeatureControlPtr->GetEnumFeature("TriggerActivation")->SetValue("FallingEdge");
 	}
-	
 
 	//是否支持自动白平衡
 	m_bBalanceWhiteAuto = m_objFeatureControlPtr->IsImplemented("BalanceWhiteAuto");

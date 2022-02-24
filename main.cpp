@@ -277,7 +277,7 @@ void fromDesired2FactualTest()
 void testCornerDetect() {
 	auto t1 = tic();
 
-	cv::Mat img = cv::imread("markerFar5.bmp");  // CV_8UC3
+	cv::Mat img = cv::imread("markerFar7.bmp");  // CV_8UC3
 	if (!img.data)
 	{
 		printf(" No image data \n ");
@@ -287,7 +287,7 @@ void testCornerDetect() {
 	img.convertTo(img, CV_32FC1, 1.0 / 255.0); // CV_32FC1
 
 	Detector detector(img.size());
-	Corners corners = detector.process(img);
+	QRsTemplate QRs = detector.process(img);
 
 	toc(t1, "t1");
 
@@ -295,13 +295,39 @@ void testCornerDetect() {
 	
 	cv::cvtColor(img, imgColor, cv::COLOR_GRAY2BGR);
 	imgColor.convertTo(imgColor, CV_8UC3, 255.0);
-	detector.showResult("cor", corners, imgColor);
+	detector.showResult("cor", QRs, imgColor);
+	return;
+}
+
+void captureImage() {
+	GxCamTest GxHandler;
+	bool success = GxHandler.openDevice();
+	if (!success) {
+		std::cout << "failed to open device..." << std::endl;
+		return;
+	}
+
+	GxHandler.startSnap();
+	while (true) {
+		int ch;
+		if (_kbhit()) { //如果有按键按下，则_kbhit()函数返回真
+			ch = _getch(); // get keyboard value
+			//std::cout << ch << std::endl;
+			if (ch == 27) { break; } // 27: esc
+			else if (ch == 119) { GxHandler.setCheckSaveBmp(); } // 119: w
+		}
+	}
+
+	GxHandler.stopSnap();
+	GxHandler.closeDevice();
 	return;
 }
 
 int main()
 {
-	testCornerDetect();
+	//testCornerDetect();
+
+	captureImage();
 
 	return 0;
 }

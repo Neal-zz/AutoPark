@@ -61,42 +61,43 @@ struct DetectRectangle
 struct QRTemplate
 {
 	QRTemplate()
-		: corner1(cv::Point_<PixelType>(0, 0)), corner2(cv::Point_<PixelType>(0, 0))
-		, corner3(cv::Point_<PixelType>(0, 0)), corner4(cv::Point_<PixelType>(0, 0))
+		: corner0(cv::Point_<PixelType>(0, 0)), corner1(cv::Point_<PixelType>(0, 0))
+		, corner2(cv::Point_<PixelType>(0, 0)), corner3(cv::Point_<PixelType>(0, 0))
 		, id(-1)
 	{}
 
+	Corner corner0;
 	Corner corner1;
 	Corner corner2;
 	Corner corner3;
-	Corner corner4;
 	int id; // 0-15 is valid.
 };
-
+using QRsTemplate = std::vector<QRTemplate>;
 
 class Detector
 {
 public:
 	Detector(const cv::Size& size);
 
-	Corners process(const cv::Mat& image);
+	QRsTemplate process(const cv::Mat& image);
 
-	void showResult(const cv::String& window_name, const Corners& corners, const cv::Mat& image);
+	void showResult(const cv::String& window_name, const QRsTemplate& QRs, const cv::Mat& image);
 
 private:
-	bool detectCorners(const cv::Mat& image, CornersTemplate& corners_on_marker);
+	bool detectCorners(const cv::Mat& image, QRsTemplate& QRs_selected);
 
 	void secondDerivCornerMetric(cv::Mat& I_angle, cv::Mat& I_weight, cv::Mat& cmax);
 	Maximas nonMaximumSuppression(const cv::Mat& img, int n = 8, int margin = 8, PixelType tau = 0.2f); // tau is the threshold.
-	bool detectCornersOnMarker(const Maximas& corners, CornersTemplate& corners_selected);
+	bool detectCornersOnMarker(const Maximas& corners, QRsTemplate& QRs_selected);
 	Corner subPixelLocation(const cv::Point& point);
-	void findFirstSecondCorners(const cv::Point& point, CornerTemplate& corner_first, CornerTemplate& corner_second, int& dir);
+	bool findFirstSecondCorners(const cv::Point& point, CornerTemplate& corner_first, CornerTemplate& corner_second);
 	void findEdgeAngles(const Corner& point, PixelType& angle1, PixelType& angle2);
 	void edgeOrientation(const cv::Mat& img_angle, const cv::Mat& img_weight, PixelType& angle1, PixelType& angle2);
 	PixelType calcBolicCorrelation(const Corner& point, const int& width, const PixelType& theta) const;
 	Corner findNextCorner(const CornerTemplate& current, const int& dir, const PixelType& searchAngle);
-	CornerTemplate predictPerpNextCorner(const CornerTemplate& current, const int& dir);
+	//CornerTemplate predictPerpNextCorner(const CornerTemplate& current, const int& dir);
 	CornerTemplate predictNextCorner(const CornerTemplate& current, const int& dir);
+	int getQRID(const QRTemplate& QR);
 
 	Eigen::MatrixXf calcPatchX();
 	cv::Mat conv2(const cv::Mat& img, const cv::Mat& kernel, const cv::String& mode);
@@ -112,7 +113,8 @@ private:
 	cv::Mat gray_image; // input image.
 	cv::Mat I_angle; // gradient direction.
 	cv::Mat I_weight; // gradient magnitude.
-	cv::Mat cmax; // all possible corners.
+	cv::Mat cmax; // corners score.
 	int initWidth; // is used for initializing searching step. 第一次真正更新，是在 findFirstSecondCorner() 函数中。
 
+	CornersTemplate corners_on_marker;// temp, test use.
 };
