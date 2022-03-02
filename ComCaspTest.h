@@ -5,16 +5,18 @@
 #include "ComCasp.h"
 
 #include <iostream>
-//#include <afx.h>
 
 class ComCaspTest
 {
 public:
 	ComCaspTest();
 	void comConnect();
-	void setFocusNum(const double& focusNumIn); // 24-70
 	void comClose();
+
+	void setFocusNum(const double& focusNumIn); // 24-70
 	double getFocusNum() const { return focusNum; };
+
+	bool getComStatus() const { return comStatus; };
 
 private:
 	double focusNum; // focus lens voltage

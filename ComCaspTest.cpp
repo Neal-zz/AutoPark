@@ -2,7 +2,7 @@
 
 
 ComCaspTest::ComCaspTest()
-	: focusNum(0), comStatus(false)
+	: focusNum(24), comStatus(false)
 {
 
 }
@@ -30,8 +30,10 @@ void ComCaspTest::comConnect()
 
 void ComCaspTest::setFocusNum(const double& focusNumIn)
 {
-	if (focusNum == focusNumIn || comStatus==false)
+	if (focusNum == focusNumIn || comStatus == false) {
 		return;
+	}
+		
 	focusNum = focusNumIn;
 	// change focus lens.
 	eCOMCaspErr Casp_Status;
@@ -50,10 +52,9 @@ void ComCaspTest::comClose()
 	// close the caspian.
 	Casp_CloseCOM();
 	comStatus = false;
+	focusNum = 24;
 	return;
 }
-
-
 
 
 

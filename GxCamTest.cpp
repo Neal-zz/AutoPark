@@ -27,6 +27,8 @@ GxCamTest::GxCamTest()
 	if (_access(m_strSavePath.c_str(), 0) == -1) {
 		_mkdir(m_strSavePath.c_str()); // if save path doesn't exist, create one.
 	}
+
+	imgFlow.create(2048, 2448, CV_8UC1); // img width; height; 8 bit, unsigned, 1 channel.
 }
 
 BOOL GxCamTest::openDevice()
@@ -358,6 +360,19 @@ void GxCamTest::stopSnap()
 //		return;
 //	}
 //}
+
+void GxCamTest::writeImgFlow(CImageDataPointer& objImageDataPointer)
+{
+	void* pRaw8Buffer = NULL;
+	pRaw8Buffer = objImageDataPointer->ConvertToRaw8(GX_BIT_0_7);
+	memcpy(imgFlow.data, pRaw8Buffer, (objImageDataPointer->GetHeight()) * (objImageDataPointer->GetWidth()));
+	cv::flip(imgFlow, imgFlow, 0);
+
+	//cv::resize(imgFlow, imgFlow, cv::Size(), 0.3, 0.3);
+	//cv::imshow("test", imgFlow);
+	//cv::waitKey(1);
+	return;
+}
 
 void GxCamTest::setCheckSaveBmp()
 {

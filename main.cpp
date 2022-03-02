@@ -274,31 +274,6 @@ void fromDesired2FactualTest()
 	return;
 }
 
-void testCornerDetect() {
-	auto t1 = tic();
-
-	cv::Mat img = cv::imread("markerFar7.bmp");  // CV_8UC3
-	if (!img.data)
-	{
-		printf(" No image data \n ");
-		return;
-	}
-	cv::cvtColor(img, img, cv::COLOR_BGR2GRAY); // CV_8UC1
-	img.convertTo(img, CV_32FC1, 1.0 / 255.0); // CV_32FC1
-
-	Detector detector(img.size());
-	QRsTemplate QRs = detector.process(img);
-
-	toc(t1, "t1");
-
-	cv::Mat imgColor;
-	
-	cv::cvtColor(img, imgColor, cv::COLOR_GRAY2BGR);
-	imgColor.convertTo(imgColor, CV_8UC3, 255.0);
-	detector.showResult("cor", QRs, imgColor);
-	return;
-}
-
 void captureImage() {
 	GxCamTest GxHandler;
 	bool success = GxHandler.openDevice();
@@ -323,11 +298,53 @@ void captureImage() {
 	return;
 }
 
+void markerDetectAndFollow() {
+	// 第一版：只关注 ROI1.
+
+	// registe Detector
+	Detector monitor;
+	if (!monitor.getInitStatus()) {
+		std::cout << "fail to registe Detector!" << std::endl;
+		return;
+	}
+
+	// take 3 pictures and get the accurateFocalVoltage.
+	bool coarseSuccess = false;
+	while (!coarseSuccess) {
+		coarseSuccess = monitor.coarseToFine();
+	}
+	
+	bool trackSuccess = false;
+	while (true) {
+		// get another capturedImg, track aruco1
+		trackSuccess = monitor.trackNextCaptured();
+	
+
+		if (!trackSuccess) {
+			std::cout << "trackNextCaptured failed!" << std::endl;
+			bool coarseSuccess = false;
+			while (!coarseSuccess) {
+				coarseSuccess = monitor.coarseToFine();
+			}
+		}
+
+		int ch;
+		if (_kbhit()) { // if any key is pressed, _kbhit() = true.
+			ch = _getch(); // get keyboard value
+			if (ch == 27) { break; } // 27: esc
+		}
+	}
+
+	return;
+}
+
 int main()
 {
+	//comCaspLensTest();
 	//testCornerDetect();
 
-	captureImage();
+	//captureImage();
+
 
 	return 0;
 }

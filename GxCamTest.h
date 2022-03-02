@@ -24,20 +24,13 @@ class GxCamTest
 		//----------------------------------------------------------------------------------
 		void DoOnImageCaptured(CImageDataPointer& objImageDataPointer, void* pUserParam)
 		{
-			cv::Mat img;
+			
 			try
 			{
 				GxCamTest* pGxCam = (GxCamTest*)pUserParam;
 
-				//ÏÔÊ¾Í¼Ïñ
-				img.create(objImageDataPointer->GetHeight(), objImageDataPointer->GetWidth(), CV_8UC1); // 8 bit, unsigned, 1 channel.
-				void* pRaw8Buffer = NULL;
-				pRaw8Buffer = objImageDataPointer->ConvertToRaw8(GX_BIT_0_7);
-				memcpy(img.data, pRaw8Buffer, (objImageDataPointer->GetHeight()) * (objImageDataPointer->GetWidth()));
-				cv::flip(img, img, 0);
-				cv::resize(img, img, cv::Size(), 0.3, 0.3);
-				cv::imshow("sss", img);
-				cv::waitKey(1);
+				// update image at pGxCam.imgFlow
+				pGxCam->writeImgFlow(objImageDataPointer);
 
 				//ÅÐ¶ÏÊÇ·ñÐèÒª±£´æÍ¼Ïñ
 				if (pGxCam->m_bCheckSaveBmp == TRUE)
@@ -64,9 +57,10 @@ public:
 	void stopSnap();
 
 	//void softTrigger(); // unabled
-
+	void writeImgFlow(CImageDataPointer& objImageDataPointer);
 	void setCheckSaveBmp();
 
+	cv::Mat getImgFlow() const { return imgFlow; };
 private:
 
 	void __InitParam();
@@ -102,4 +96,5 @@ private:
 	std::string m_strSavePath; // Í¼Ïñ±£´æÂ·¾¶¡£
 
 	int m_iImgNum;
+	cv::Mat imgFlow;
 };
