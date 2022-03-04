@@ -5,6 +5,31 @@
 #include <direct.h>
 #include <io.h>
 
+typedef struct ImgMutex {
+
+	ImgMutex()
+		: mutex(1)
+	{
+
+	}
+
+	bool lock() {
+		if (mutex == 0) { 
+			//std::cout << "threads collide, i'm waiting...\n";
+			return false; 
+		}
+		mutex = 0;
+		return true;
+	}
+	bool unlock() {
+		mutex = 1;
+		return true;
+	}
+
+	int mutex;
+	cv::Mat imgFlow;
+}ImgMutex;
+
 class GxCamTest
 {
 	//---------------------------------------------------------------------------------
@@ -24,7 +49,7 @@ class GxCamTest
 		//----------------------------------------------------------------------------------
 		void DoOnImageCaptured(CImageDataPointer& objImageDataPointer, void* pUserParam)
 		{
-			
+
 			try
 			{
 				GxCamTest* pGxCam = (GxCamTest*)pUserParam;
@@ -51,16 +76,16 @@ class GxCamTest
 
 public:
 	GxCamTest();
-	BOOL openDevice();
+	bool openDevice();
 	void closeDevice();
 	void startSnap();
 	void stopSnap();
 
 	//void softTrigger(); // unabled
 	void writeImgFlow(CImageDataPointer& objImageDataPointer);
-	void setCheckSaveBmp();
+	void setCheckSaveBmp() { m_bCheckSaveBmp = true; };
 
-	cv::Mat getImgFlow() const { return imgFlow; };
+	cv::Mat getImgFlow();
 private:
 
 	void __InitParam();
@@ -96,5 +121,6 @@ private:
 	std::string m_strSavePath; // Í¼Ïñ±£´æÂ·¾¶¡£
 
 	int m_iImgNum;
-	cv::Mat imgFlow;
+	ImgMutex imgMutex;
+	//std::chrono::system_clock::time_point startGx;
 };

@@ -28,10 +28,11 @@ GxCamTest::GxCamTest()
 		_mkdir(m_strSavePath.c_str()); // if save path doesn't exist, create one.
 	}
 
-	imgFlow.create(2048, 2448, CV_8UC1); // img width; height; 8 bit, unsigned, 1 channel.
+	//startGx = std::chrono::system_clock::now();
+	//imgFlow.create(2048, 2448, CV_8UC1); // img width; height; 8 bit, unsigned, 1 channel.
 }
 
-BOOL GxCamTest::openDevice()
+bool GxCamTest::openDevice()
 {
 	/*OnInitDialog()*/
 
@@ -52,7 +53,7 @@ BOOL GxCamTest::openDevice()
 		}
 
 		std::cout << e.what() << std::endl;
-		return FALSE;
+		return false;
 
 	}
 	catch (std::exception& e)
@@ -64,7 +65,7 @@ BOOL GxCamTest::openDevice()
 		}
 
 		std::cout << e.what() << std::endl;
-		return FALSE;
+		return false;
 
 	}
 
@@ -83,7 +84,7 @@ BOOL GxCamTest::openDevice()
 		if (vectorDeviceInfo.size() <= 0)
 		{
 			std::cout << "find no device!" << std::endl;
-			return FALSE;
+			return false;
 		}
 
 		// open device.
@@ -157,7 +158,7 @@ BOOL GxCamTest::openDevice()
 		//}
 
 		std::cout << e.what() << std::endl;
-		return TRUE;
+		return false; // 原先是TRUE
 	}
 	catch (std::exception& e)
 	{
@@ -180,8 +181,10 @@ BOOL GxCamTest::openDevice()
 		//}
 
 		std::cout << e.what() << std::endl;
-		return TRUE;
+		return false; // 原先是TRUE
 	}
+	std::cout << "camera successfully connected!\n";
+	return true;
 }
 
 void GxCamTest::closeDevice()
@@ -363,20 +366,26 @@ void GxCamTest::stopSnap()
 
 void GxCamTest::writeImgFlow(CImageDataPointer& objImageDataPointer)
 {
-	void* pRaw8Buffer = NULL;
-	pRaw8Buffer = objImageDataPointer->ConvertToRaw8(GX_BIT_0_7);
-	memcpy(imgFlow.data, pRaw8Buffer, (objImageDataPointer->GetHeight()) * (objImageDataPointer->GetWidth()));
-	cv::flip(imgFlow, imgFlow, 0);
+	if (objImageDataPointer->GetStatus() == GX_FRAME_STATUS_SUCCESS) {
+		cv::Mat imgTemp(objImageDataPointer->GetHeight(), objImageDataPointer->GetWidth(), CV_8UC1);
+		void* pRaw8Buffer = NULL;
+		pRaw8Buffer = objImageDataPointer->ConvertToRaw8(GX_BIT_0_7);
+		memcpy(imgTemp.data, pRaw8Buffer, (objImageDataPointer->GetHeight()) * (objImageDataPointer->GetWidth()));
+		//std::cout << imgTemp.size() << std::endl;
+		while (!imgMutex.lock()) {}
+		imgMutex.imgFlow = imgTemp;
+		imgMutex.unlock();
 
-	//cv::resize(imgFlow, imgFlow, cv::Size(), 0.3, 0.3);
-	//cv::imshow("test", imgFlow);
-	//cv::waitKey(1);
+		cv::resize(imgTemp, imgTemp, cv::Size(), 0.3, 0.3);
+		cv::imshow("test", imgTemp);
+		cv::waitKey(1);
+
+		//std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
+		//std::chrono::duration<double, std::milli> duration_ms = end-startGx;
+		//std::cout << '\t' << duration_ms.count() << "ms\n";
+	}
+	
 	return;
-}
-
-void GxCamTest::setCheckSaveBmp()
-{
-	m_bCheckSaveBmp = true;
 }
 
 void GxCamTest::SavePicture(CImageDataPointer& objImageDataPointer)
@@ -389,15 +398,15 @@ void GxCamTest::SavePicture(CImageDataPointer& objImageDataPointer)
 		std::string strFileName = ""; // img save name.
 		strFileName = strFilePath + "/" + std::to_string(m_iImgNum) + ".bmp";
 			
-
 		//保存图像为BMP
-		cv::Mat img;
-		img.create(objImageDataPointer->GetHeight(), objImageDataPointer->GetWidth(), CV_8UC1); // 8 bit, unsigned, 3 channel.
-		void* pRaw8Buffer = NULL;
-		pRaw8Buffer = objImageDataPointer->ConvertToRaw8(GX_BIT_0_7);
-		memcpy(img.data, pRaw8Buffer, (objImageDataPointer->GetHeight()) * (objImageDataPointer->GetWidth()));
-		cv::flip(img, img, 0);
-		cv::imwrite(strFileName, img);
+		//cv::Mat img;
+		//img.create(objImageDataPointer->GetHeight(), objImageDataPointer->GetWidth(), CV_8UC1);
+		//void* pRaw8Buffer = NULL;
+		//pRaw8Buffer = objImageDataPointer->ConvertToRaw8(GX_BIT_0_7);
+		//memcpy(img.data, pRaw8Buffer, (objImageDataPointer->GetHeight()) * (objImageDataPointer->GetWidth()));
+		//cv::flip(img, img, 0);
+		// 
+		//cv::imwrite(strFileName, imgFlow);
 
 		m_iImgNum += 1;
 		m_bCheckSaveBmp = false;
@@ -409,6 +418,14 @@ void GxCamTest::SavePicture(CImageDataPointer& objImageDataPointer)
 
 	}
 
+}
+
+cv::Mat GxCamTest::getImgFlow() {
+	cv::Mat imgTemp;
+	while (!imgMutex.lock()) { }
+	imgTemp = imgMutex.imgFlow;
+	imgMutex.unlock();
+	return imgTemp;
 }
 
 void GxCamTest::__InitParam()
@@ -469,3 +486,5 @@ void GxCamTest::__InitParam()
 	m_dBalanceWhiteRatioMax = m_objFeatureControlPtr->GetFloatFeature("BalanceRatio")->GetMax();
 	m_dBalanceWhiteRatioMin = m_objFeatureControlPtr->GetFloatFeature("BalanceRatio")->GetMin();
 }
+
+

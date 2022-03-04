@@ -208,30 +208,35 @@ void comCaspLensTest()
 	int ch;
 	ComCaspTest casp1;
 	casp1.comConnect();
-	casp1.setFocusNum(40);
+	casp1.setFocusVoltage(60);
+	
 	double caspFocus = 0;
-	while (1 == 1)
+	while (true)
 	{
 		if (_kbhit()){
 			ch = _getch();
-			if (ch == 81) // q = +
+			std::cout << ch << std::endl;
+			if (ch == 113) // q = caspFocus ++
 			{
-				caspFocus = casp1.getFocusNum();
+				caspFocus = casp1.getFocusVoltage();
 				std::cout << "focus= " << caspFocus << std::endl;
 				caspFocus++;
-				if (caspFocus <= 69) { casp1.setFocusNum(caspFocus); }
+				if (caspFocus <= 69) { casp1.setFocusVoltage(caspFocus); }
 			}
-			else if (ch == 65) // a = -
+			else if (ch == 97) // a = caspFocus --
 			{
-				caspFocus = casp1.getFocusNum();
+				caspFocus = casp1.getFocusVoltage();
 				std::cout << "focus= " << caspFocus << std::endl;
 				caspFocus--;
-				if (caspFocus >= 25) { casp1.setFocusNum(caspFocus); }
+				if (caspFocus >= 25) { casp1.setFocusVoltage(caspFocus); }
 			}
 			else if (ch == 27){ break; }
 		}
 	}
+
+	casp1.comClose();
 	system("pause");
+	return;
 }
 
 void fromDesired2FactualTest()
@@ -275,23 +280,39 @@ void fromDesired2FactualTest()
 }
 
 void captureImage() {
+
+	// open caspian
+	ComCaspTest casp1;
+	casp1.comConnect();
+	
+	// open camera
 	GxCamTest GxHandler;
-	bool success = GxHandler.openDevice();
-	if (!success) {
-		std::cout << "failed to open device..." << std::endl;
+	if (!GxHandler.openDevice()) {
 		return;
 	}
-
-	GxHandler.startSnap();
-	while (true) {
-		int ch;
-		if (_kbhit()) { //如果有按键按下，则_kbhit()函数返回真
-			ch = _getch(); // get keyboard value
-			//std::cout << ch << std::endl;
-			if (ch == 27) { break; } // 27: esc
-			else if (ch == 119) { GxHandler.setCheckSaveBmp(); } // 119: w
+	GxHandler.startSnap(); // GxHandler.imgFlow starts to update.
+	
+	casp1.setFocusVoltage(55);
+	Sleep(500);
+	GxHandler.setCheckSaveBmp();
+	
+	int ch;
+	while (true)
+	{
+		if (_kbhit()) {
+			ch = _getch();
+			if (ch==113) { // q
+				casp1.setFocusVoltage(60);
+				Sleep(80);
+				GxHandler.setCheckSaveBmp();
+			}
+			else if (ch == 27) { // esc
+				break; 
+			}
 		}
 	}
+
+	casp1.comClose();
 
 	GxHandler.stopSnap();
 	GxHandler.closeDevice();
@@ -307,26 +328,34 @@ void markerDetectAndFollow() {
 		std::cout << "fail to registe Detector!" << std::endl;
 		return;
 	}
+	else {
+		std::cout << "monitor successfully connected!" << std::endl;
+	}
+	Sleep(1000);
 
-	// take 3 pictures and get the accurateFocalVoltage.
+	// from coarse to fine
 	bool coarseSuccess = false;
 	while (!coarseSuccess) {
 		coarseSuccess = monitor.coarseToFine();
 	}
-	
+	std::cout << "coarseToFine Success!" << std::endl;
+
 	bool trackSuccess = false;
 	while (true) {
 		// get another capturedImg, track aruco1
 		trackSuccess = monitor.trackNextCaptured();
-	
 
-		if (!trackSuccess) {
+		if (trackSuccess) {
+			std::cout << "trackNextCaptured success!" << std::endl;
+		}
+		else {
 			std::cout << "trackNextCaptured failed!" << std::endl;
 			bool coarseSuccess = false;
 			while (!coarseSuccess) {
 				coarseSuccess = monitor.coarseToFine();
 			}
 		}
+
 
 		int ch;
 		if (_kbhit()) { // if any key is pressed, _kbhit() = true.
@@ -338,6 +367,103 @@ void markerDetectAndFollow() {
 	return;
 }
 
+float sharpnessSingleImg(cv::Mat imgIn) {
+	float sharpness = 0;
+
+	cv::Ptr<cv::aruco::Dictionary> dictionary = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);
+	std::vector<std::vector<cv::Point2f>> markersCorners;
+	std::vector<int> markersId;
+	cv::aruco::detectMarkers(imgIn, dictionary, markersCorners, markersId);
+
+	if (markersId.size() == 0) {
+		return 0;
+	}
+	ArucoContainer arucoTemp(markersId.at(0), markersCorners.at(0));
+	cv::Mat ROI(imgIn, arucoTemp.area);
+
+	cv::Mat img_x, img_y, img_sobel;
+	cv::Sobel(ROI, img_x, CV_16S, 1, 0); // be careful to use CV_16S here, maintaining useful information.
+	cv::Sobel(ROI, img_y, CV_16S, 0, 1);
+	cv::convertScaleAbs(img_x, img_x); // absolute value.
+	cv::convertScaleAbs(img_y, img_y);
+	cv::addWeighted(img_x, 0.5, img_y, 0.5, 0.0, img_sobel);
+
+	float range[] = { 0, 256 }; // from 0 to 255
+	int histBinNum = range[1] - range[0];
+	const float* histRange = { range };
+	cv::Mat hist;
+	cv::calcHist(&img_sobel, 1, 0, cv::Mat(), hist, 1, &histBinNum, &histRange, true, false);
+
+	int pixelNum = 0;
+	for (int i = 95; i < histBinNum; i++) // i represents gradient; 95 = 255/2 * 3/4
+	{
+		float bin_val = hist.at<float>(i);
+		sharpness += bin_val * i;
+		pixelNum += bin_val;
+	}
+	sharpness = sharpness / pixelNum;
+
+	return sharpness;
+}
+
+void sharpnessTest() {
+
+	// open caspian
+	ComCaspTest casp1;
+	casp1.comConnect();
+
+	// open camera
+	GxCamTest GxHandler;
+	if (!GxHandler.openDevice()) {
+		return;
+	}
+	GxHandler.startSnap(); // GxHandler.imgFlow starts to update.
+
+	float focusVoltage = 49;
+	casp1.setFocusVoltage(focusVoltage);
+
+	int ch;
+	float sharpness = 0;
+	std::ofstream ofs;
+	ofs.open("text.txt", std::ios::out);
+	while (true)
+	{
+		if (_kbhit()) {
+			ch = _getch();
+			if (ch == 113) { // q
+				focusVoltage += 0.1;
+				casp1.setFocusVoltage(focusVoltage);
+				Sleep(200);
+				sharpness = sharpnessSingleImg(GxHandler.getImgFlow());
+				std::cout << focusVoltage << ": " << sharpness << "\n";
+			}
+			if (ch == 97) { // a
+				for (focusVoltage = 49; focusVoltage > 45; focusVoltage -= 0.1) {
+					casp1.setFocusVoltage(focusVoltage);
+					Sleep(200);
+					cv::Mat imgTemp(GxHandler.getImgFlow());
+					cv::imwrite(std::to_string(focusVoltage) + ".bmp", imgTemp);
+					sharpness = sharpnessSingleImg(imgTemp);
+					std::cout << focusVoltage << ": " << sharpness << "\n";
+					ofs << focusVoltage << "\t" << sharpness << "\n";
+				}
+			}
+			else if (ch == 27) { // esc
+				break;
+			}
+		}
+	}
+
+	ofs << std::endl;
+	ofs.close();
+
+	casp1.comClose();
+
+	GxHandler.stopSnap();
+	GxHandler.closeDevice();
+	return;
+}
+
 int main()
 {
 	//comCaspLensTest();
@@ -345,6 +471,9 @@ int main()
 
 	//captureImage();
 
+	//sharpnessTest();
+
+	markerDetectAndFollow();
 
 	return 0;
 }

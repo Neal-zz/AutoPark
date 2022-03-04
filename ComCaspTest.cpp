@@ -2,7 +2,7 @@
 
 
 ComCaspTest::ComCaspTest()
-	: focusNum(24), comStatus(false)
+	: focusVoltage(24), comStatus(false)
 {
 
 }
@@ -10,11 +10,9 @@ ComCaspTest::ComCaspTest()
 void ComCaspTest::comConnect()
 {
 	// connect to the caspian.
-	eCOMCaspErr Casp_Status;
-	Casp_Status = Casp_OpenCOM();
-	if (eCaspSuccess == Casp_Status)
+	if (eCaspSuccess == Casp_OpenCOM())
 	{
-		std::cout << "successfully connect!" << std::endl;
+		std::cout << "caspian successfully connected!\n";
 		comStatus = true;
 	}
 	else
@@ -28,21 +26,21 @@ void ComCaspTest::comConnect()
 }
 
 
-void ComCaspTest::setFocusNum(const double& focusNumIn)
+void ComCaspTest::setFocusVoltage(const float& focusVoltageIn)
 {
-	if (focusNum == focusNumIn || comStatus == false) {
+	if (focusVoltage == focusVoltageIn || comStatus == false) {
 		return;
 	}
 		
-	focusNum = focusNumIn;
+	focusVoltage = focusVoltageIn;
 	// change focus lens.
 	eCOMCaspErr Casp_Status;
-	Casp_Status = Casp_SetFocus(static_cast<double>(focusNum));
+	Casp_Status = Casp_SetFocus(static_cast<double>(focusVoltage));
 	if (eCaspSuccess != Casp_Status)
 	{
 		//CString str;
 		//str = Casp_GetErrorMsg(Casp_Status);
-		std::cout << "fail to set focus num!" << std::endl;
+		std::cout << "fail to set focus voltage!" << std::endl;
 	}
 	return;
 }
@@ -52,7 +50,7 @@ void ComCaspTest::comClose()
 	// close the caspian.
 	Casp_CloseCOM();
 	comStatus = false;
-	focusNum = 24;
+	focusVoltage = 24;
 	return;
 }
 

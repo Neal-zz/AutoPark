@@ -1,13 +1,15 @@
 #include "Detector.h"
 
 
-float focalRange[3] = { 47, 47.6, 48.2 }; // applied voltage, used for find aruco.
-float coarseStepSize = 0.1; // coarse search step
-float fineStepSize = 0.05; // fine search step
-int maxFalseCount = 5; // used in bilateralSearch to determine whether trackAruco1 successfully.
+float focalRange[2] = { 45.5, 47.5 }; // applied voltage, search range.
+float coarseStepSize = 0.5; // coarse search step
+float fineStepSize = 0.1; // fine search step
+int maxFalseCount = 3; // used in bilateralSearch to determine whether trackAruco1 successfully.
+int coarseSleepTime = 50;
+int fineSleepTime = 1; // don't sleep.
 
 Detector::Detector()
-	: accurateFocalVoltage(47)
+	: accurateFocalVoltage((focalRange[0]+ focalRange[1])/2)
 {
 	capturedImg.create(2048, 2448, CV_8UC1);
 	aruco1 = ArucoContainer();
@@ -17,13 +19,11 @@ Detector::Detector()
 	// open caspian
 	casp.comConnect();
 	if (!casp.getComStatus()) {
-		std::cout << "failed to open caspian..." << std::endl;
 		initStatus = false;
 	}
 
 	// open camera
 	if (!GxHandler.openDevice()) {
-		std::cout << "failed to open camera..." << std::endl;
 		initStatus = false;
 	}
 	GxHandler.startSnap(); // GxHandler.imgFlow starts to update.
@@ -42,137 +42,172 @@ Detector::~Detector()
 
 bool Detector::coarseToFine()
 {
-	// find aruco, update approx focal voltage.
-	for (const float& setFocalVoltage : focalRange) {
-		casp.setFocusNum(setFocalVoltage);
+	// find max aruco 
+	casp.setFocusVoltage((focalRange[0]+focalRange[1])/2);
+	Sleep(200); // wait until focus ready.
+
+	cv::Ptr<cv::aruco::Dictionary> dictionary = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);
+	std::vector<std::vector<cv::Point2f>> markersCorners;
+	std::vector<int> markersId;
+	while (markersId.size() == 0) {
 		updateCapturedImg(GxHandler.getImgFlow());
-
-		cv::Ptr<cv::aruco::Dictionary> dictionary = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);	
-		std::vector<std::vector<cv::Point2f>> markersCorners;
-		std::vector<int> markersId;
 		cv::aruco::detectMarkers(capturedImg, dictionary, markersCorners, markersId);
-
-		if (markersId.size() > 0) { // if find marker
-
-			// aruco with maximum area is set marker1
-			float maxArea = 0;
-			int maxId = -1;
-			for (int marker_i = 0; marker_i < markersId.size(); marker_i++) {
-				ArucoContainer arucoTemp(markersId.at(marker_i), markersCorners.at(marker_i));
-				if (arucoTemp.area.area() > maxArea) {
-					maxArea = arucoTemp.area.area();
-					maxId = marker_i;
-				}
-			}
-			aruco1 = ArucoContainer(markersId.at(maxId), markersCorners.at(maxId));
-
-			break;
-		} 
 	}
+	
+	std::cout << "Detector::coarseToFine find marker!" << std::endl;
 
-	if (aruco1.id == -1) { // not find
+	float maxArea = 0;
+	int maxId = -1;
+	for (int marker_i = 0; marker_i < markersId.size(); marker_i++) {
+		ArucoContainer arucoTemp(markersId.at(marker_i), markersCorners.at(marker_i));
+		if (arucoTemp.area.area() > maxArea) {
+			maxArea = arucoTemp.area.area();
+			maxId = marker_i;
+		}
+	}
+	aruco1 = ArucoContainer(markersId.at(maxId), markersCorners.at(maxId));
+
+	// coarse bilateral search, coarseStepSize 0.5v
+	float bestFocalVoltage;
+	float LocalBestFV = (focalRange[0] + focalRange[1]) / 2;
+	if (!bilateralSearch(LocalBestFV, coarseStepSize, coarseSleepTime, bestFocalVoltage)) {
 		return false;
 	}
 
-	// coarse bilateral search, coarseStepSize 0.1v
-	float approxFocalVoltage = getApproxFV(); // estimate from aruco1 size
-	float bestFocalVoltage;
-	bool searchSuccess = false;
-	searchSuccess = bilateralSearch(approxFocalVoltage, coarseStepSize, bestFocalVoltage);
-	if (searchSuccess) {
-		updateAccurateFV(bestFocalVoltage);
+	std::cout << "Detector::coarseToFine coarse search success!" << std::endl;
+
+	// fine bilateral search, fineStepSize 0.1v
+	LocalBestFV = bestFocalVoltage;
+	if (!bilateralSearch(LocalBestFV, fineStepSize, fineSleepTime, bestFocalVoltage)) {
+		return false;
 	}
 
-	return searchSuccess;
+	std::cout << "Detector::coarseToFine fine search success!" << std::endl;
+
+	updateAccurateFV(bestFocalVoltage);
+	return true;
 }
 
 bool Detector::trackNextCaptured() {
 
-	// fine bilateral search, fineStepSize 0.05v
+	// fine bilateral search, fineStepSize 0.1v
 	float bestFocalVoltage;
-	bool searchSuccess = false;
-	searchSuccess = bilateralSearch(accurateFocalVoltage, fineStepSize, bestFocalVoltage);
-	if (searchSuccess) {
-		updateAccurateFV(bestFocalVoltage);
+	if (!bilateralSearch(accurateFocalVoltage, 0.2, fineSleepTime, bestFocalVoltage)) { // 试试看调大步长到 0.2
+		return false;
 	}
 
-	return searchSuccess;
-}
-
-float Detector::getApproxFV() const
-{
-	int areaSize = aruco1.area.area();
-	float approxFocalVoltage = 47.6; // TODO: a model, used to estimate focal voltage.
-	return approxFocalVoltage;
+	updateAccurateFV(bestFocalVoltage);
+	return true;
 }
 
 // bestFocalVoltage is the best focal voltage in current step size
-bool Detector::bilateralSearch(float currentFocalVoltage, float stepSize, float& bestFocalVoltage)
+// we assume that the input currentFocalVoltage == casp.getFocusVoltage.
+bool Detector::bilateralSearch(float currentFocalVoltage, float stepSize, int sleepTime, float& bestFocalVoltage)
 {
 	int searchDirection = 0;
 	float bestSharpness = 0;
 
-	// determine the search direction
-	float sharpnessLMH[3]; // low, middle and high.
-	float focalVoltage[3] = { currentFocalVoltage - stepSize, currentFocalVoltage, currentFocalVoltage + stepSize };
-	for (int i = 0; i < 3; i++) {
-		bool trackSuccess = false;
-		float fv = focalVoltage[i];
-		casp.setFocusNum(fv);
+	if (abs(currentFocalVoltage - casp.getFocusVoltage()) > (0.8 * fineStepSize)) { // min step size is 0.1
+		std::cout << "something went wrong in Detector::bilateralSearch." << std::endl;
+		return false;
+	}
 
-		int falseCount = 0;
-		while (!trackSuccess && falseCount < maxFalseCount) { // falseCount > 5, means track failed
+	// get sharpness at currentFocalVoltage
+	bool trackSuccess = false;
+	int falseCount = 0;
+	float sharpnessM = 0;
+	while (!trackSuccess && falseCount < maxFalseCount) { // falseCount > 3, means track failed
+		updateCapturedImg(GxHandler.getImgFlow());
+		trackSuccess = trackAruco1();
+		if (!trackSuccess) {
+			falseCount++;
+			continue;
+		}
+		casp.setFocusVoltage(currentFocalVoltage + stepSize); // set next focus voltage.
+		Sleep(sleepTime); // Sleep time may be unnecessary? TODO
+		sharpnessM = detectSharpness();
+	}
+	if (falseCount >= maxFalseCount) {
+		std::cout << "Detector::bilateralSearch - trackAruco1 failed1!" << std::endl;
+		return false;
+	}
+
+	// first search right handside
+	trackSuccess = false;
+	falseCount = 0;
+	float sharpnessH = 0;
+	while (!trackSuccess && falseCount < maxFalseCount) { // falseCount > 3, means track failed
+		updateCapturedImg(GxHandler.getImgFlow());
+		trackSuccess = trackAruco1();
+		if (!trackSuccess) {
+			falseCount++;
+			continue;
+		}
+		casp.setFocusVoltage(currentFocalVoltage - stepSize); // set next focus voltage.
+		Sleep(sleepTime); // Sleep time may be unnecessary? TODO
+		sharpnessH = detectSharpness();
+	}
+	if (falseCount >= maxFalseCount) {
+		std::cout << "Detector::bilateralSearch - trackAruco1 failed2!" << std::endl;
+		return false;
+	}
+	
+	if (sharpnessH > sharpnessM) {
+		searchDirection = 1;
+		bestSharpness = sharpnessH;
+		currentFocalVoltage += stepSize;
+		casp.setFocusVoltage(currentFocalVoltage + stepSize); // set next focus voltage.
+		Sleep(sleepTime); // Sleep time may be unnecessary? TODO
+	}
+	else { // else search left handside
+		trackSuccess = false;
+		falseCount = 0;
+		float sharpnessL = 0;
+		while (!trackSuccess && falseCount < maxFalseCount) { // falseCount > 3, means track failed
 			updateCapturedImg(GxHandler.getImgFlow());
 			trackSuccess = trackAruco1();
 			if (!trackSuccess) {
 				falseCount++;
 				continue;
 			}
-			sharpnessLMH[i] = detectSharpness();
 
+			sharpnessL = detectSharpness();
 		}
 		if (falseCount >= maxFalseCount) {
-			std::cout << "bilateralSearch - trackAruco1 failed1!" << std::endl;
+			std::cout << "Detector::bilateralSearch - trackAruco1 failed3!" << std::endl;
 			return false;
 		}
-			
+
+		if (sharpnessL > sharpnessM) {
+			searchDirection = -1;
+			bestSharpness = sharpnessL;
+			currentFocalVoltage -= stepSize;
+			casp.setFocusVoltage(currentFocalVoltage - stepSize); // set next focus voltage.
+			Sleep(sleepTime); // Sleep time may be unnecessary? TODO
+		}
 	}
 
-	if (sharpnessLMH[1] >= sharpnessLMH[0] && sharpnessLMH[1] >= sharpnessLMH[2]) {
-		bestFocalVoltage = focalVoltage[1];
-		//if (sharpnessLMH[0] >= sharpnessLMH[2]) {
-		//	focalVoltage2 = focalVoltage[0];
-		//}
-		//else {
-		//	focalVoltage2 = focalVoltage[2];
-		//}
+	// search towards searchDirection, and find the best focal voltage
+	if (searchDirection == 0) {
+		bestFocalVoltage = currentFocalVoltage;
+		casp.setFocusVoltage(currentFocalVoltage); // set next focus voltage.
+		Sleep(sleepTime); // Sleep time may be unnecessary? TODO
 		return true;
 	}
-	else if (sharpnessLMH[0] >= sharpnessLMH[2]) {
-		searchDirection = -1;
-		currentFocalVoltage = focalVoltage[0];
-		bestSharpness = sharpnessLMH[0];
-	}
-	else {
-		searchDirection = 1;
-		currentFocalVoltage = focalVoltage[2];
-		bestSharpness = sharpnessLMH[2];
-	}
 
-	// find the best focal voltage
 	while (true) {
-		int falseCount = 0;
-		bool trackSuccess = false;
+		falseCount = 0;
+		trackSuccess = false;
 		float currentSharpness = 0;
-		float fv = currentFocalVoltage + stepSize * searchDirection;
-		casp.setFocusNum(fv);
-		while (!trackSuccess || falseCount < maxFalseCount) { // falseCount > maxFalseCount, means track failed
+		while (!trackSuccess && falseCount < maxFalseCount) { // falseCount > maxFalseCount, means track failed
 			updateCapturedImg(GxHandler.getImgFlow());
 			trackSuccess = trackAruco1();
 			if (!trackSuccess) {
 				falseCount++;
 				continue;
 			}
+			casp.setFocusVoltage(currentFocalVoltage + 2 * searchDirection * stepSize); // set next focus voltage.
+			Sleep(sleepTime); // Sleep time may be unnecessary? TODO
 			currentSharpness = detectSharpness();
 		}
 		if (falseCount >= maxFalseCount) {
@@ -182,10 +217,11 @@ bool Detector::bilateralSearch(float currentFocalVoltage, float stepSize, float&
 
 		if (currentSharpness > bestSharpness) {
 			bestSharpness = currentSharpness;
-			currentFocalVoltage = fv;
+			currentFocalVoltage += searchDirection * stepSize;
 		}
 		else {
-			casp.setFocusNum(currentFocalVoltage);
+			casp.setFocusVoltage(currentFocalVoltage);
+			Sleep(sleepTime);
 			bestFocalVoltage = currentFocalVoltage;
 			break;
 		}
@@ -196,7 +232,7 @@ bool Detector::bilateralSearch(float currentFocalVoltage, float stepSize, float&
 
 bool Detector::trackAruco1()
 {
-	// use last updated aruco1 information to track aruco1
+	// use last updated aruco1 information, double aruco1.area to track aruco1
 	bool trackSuccess=false;
 	cv::Ptr<cv::aruco::Dictionary> dictionary = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);
 
@@ -211,16 +247,26 @@ bool Detector::trackAruco1()
 
 		std::vector<std::vector<cv::Point2f>> markersCorners;
 		std::vector<int> markersId;
+		cv::Mat imgTemp(capturedImg);
 		cv::Mat imgROI(capturedImg, roiRect);
 		cv::aruco::detectMarkers(imgROI, dictionary, markersCorners, markersId);
 		
 		if (markersId.size() > 0) { // find aruco1
-			aruco1 = ArucoContainer(markersId.at(0), markersCorners.at(0));
+			std::vector<cv::Point2f > markerCorners;
+			markerCorners.emplace_back(cv::Point2f(center_x - halfWidth + markersCorners.at(0).at(0).x,
+				center_y - halfHeight + markersCorners.at(0).at(0).y));
+			markerCorners.emplace_back(cv::Point2f(center_x - halfWidth + markersCorners.at(0).at(1).x,
+				center_y - halfHeight + markersCorners.at(0).at(1).y));
+			markerCorners.emplace_back(cv::Point2f(center_x - halfWidth + markersCorners.at(0).at(2).x,
+				center_y - halfHeight + markersCorners.at(0).at(2).y));
+			markerCorners.emplace_back(cv::Point2f(center_x - halfWidth + markersCorners.at(0).at(3).x,
+				center_y - halfHeight + markersCorners.at(0).at(3).y));
+			aruco1 = ArucoContainer(markersId.at(0), markerCorners);
 			trackSuccess = true;
 			break;
 		}
 
-		if (roiRect.area() > (3 / 4 * capturedImg.cols * capturedImg.rows)) {
+		if (roiRect.area() > (3 / 4 * capturedImg.cols * capturedImg.rows)) { // roi too big
 			break;
 		}
 	}
@@ -232,6 +278,7 @@ float Detector::detectSharpness() const
 {
 	float sharpness = 0;
 
+	//cv::Mat ROITmp = capturedImg;
 	cv::Mat ROI(capturedImg, aruco1.area);
 	//cv::resize(ROI, ROI, cv::Size(100, 100)); // TODO: Is ROI resize encessary?
 
@@ -249,14 +296,11 @@ float Detector::detectSharpness() const
 	cv::calcHist(&img_sobel, 1, 0, cv::Mat(), hist, 1, &histBinNum, &histRange, true, false);
 
 	int pixelNum = 0;
-	for (int i = 0; i < histBinNum; i++) // i represents gradient
+	for (int i = 95; i < histBinNum; i++) // i represents gradient; 95 = 255/2 * 3/4
 	{
 		float bin_val = hist.at<float>(i);
-		if (i > 10) {
-			sharpness += bin_val * i;
-			pixelNum += bin_val;
-		}
-		
+		sharpness += bin_val * i;
+		pixelNum += bin_val;
 	}
 	sharpness = sharpness / pixelNum;
 

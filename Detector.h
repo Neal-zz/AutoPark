@@ -52,8 +52,8 @@ public:
 private:
 	void updateCapturedImg(const cv::Mat& imgFlow) { capturedImg = imgFlow; };
 	void updateAccurateFV(float bestFocalVoltage) { accurateFocalVoltage = bestFocalVoltage; };
-	float getApproxFV() const;
-	bool bilateralSearch(float currentFocalVoltage, float stepSize, float& bestFocalVoltge);
+	//float getApproxFV() const; // get approximate focal voltage
+	bool bilateralSearch(float currentFocalVoltage, float stepSize, int sleepTime, float& bestFocalVoltge);
 	bool trackAruco1();
 	float detectSharpness() const;
 
@@ -65,7 +65,7 @@ private:
 
 	ArucoContainer aruco1;
 
-	float accurateFocalVoltage;
+	float accurateFocalVoltage; // current best Focal Voltage, used for trackNextCaptured().
 	
 	// pose
 };

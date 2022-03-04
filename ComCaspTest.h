@@ -13,12 +13,12 @@ public:
 	void comConnect();
 	void comClose();
 
-	void setFocusNum(const double& focusNumIn); // 24-70
-	double getFocusNum() const { return focusNum; };
+	void setFocusVoltage(const float& focusVoltageIn); // 24-70
+	float getFocusVoltage() const { return focusVoltage; };
 
 	bool getComStatus() const { return comStatus; };
 
 private:
-	double focusNum; // focus lens voltage
+	float focusVoltage; // focus lens voltage
 	bool comStatus; // true: connected.
 };
