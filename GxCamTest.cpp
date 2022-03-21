@@ -13,8 +13,8 @@ GxCamTest::GxCamTest()
 	, m_strBalanceWhiteAutoMode("Off")
 	, m_pSampleCaptureEventHandle(NULL)
 	, m_bCheckSaveBmp(false)
-	, m_dEditShutterValue(20000) // 曝光
-	, m_dEditGainValue(0) // 增益
+	, m_dEditShutterValue(2000) // 曝光
+	, m_dEditGainValue(10000) // 增益
 	, m_dEditBalanceRatioValue(0)
 	, m_dShutterValueMax(0)
 	, m_dShutterValueMin(0)
@@ -377,7 +377,7 @@ void GxCamTest::writeImgFlow(CImageDataPointer& objImageDataPointer)
 		imgMutex.unlock();
 
 		cv::resize(imgTemp, imgTemp, cv::Size(), 0.3, 0.3);
-		cv::imshow("test", imgTemp);
+		cv::imshow("raw", imgTemp);
 		cv::waitKey(1);
 
 		//std::chrono::system_clock::time_point end = std::chrono::system_clock::now();
@@ -422,7 +422,7 @@ void GxCamTest::SavePicture(CImageDataPointer& objImageDataPointer)
 
 cv::Mat GxCamTest::getImgFlow() {
 	cv::Mat imgTemp;
-	while (!imgMutex.lock()) { }
+	while (!imgMutex.lock()) { } // wait until successfully lock
 	imgTemp = imgMutex.imgFlow;
 	imgMutex.unlock();
 	return imgTemp;
@@ -485,6 +485,32 @@ void GxCamTest::__InitParam()
 	m_dGainValueMin = m_objFeatureControlPtr->GetFloatFeature("Gain")->GetMin();
 	m_dBalanceWhiteRatioMax = m_objFeatureControlPtr->GetFloatFeature("BalanceRatio")->GetMax();
 	m_dBalanceWhiteRatioMin = m_objFeatureControlPtr->GetFloatFeature("BalanceRatio")->GetMin();
+
+	double dGainValueOld = m_dEditGainValue;
+	try
+	{
+		//判断输入值是否在增益值范围内，如果不是则设置与其最近的边界值
+		if (m_dEditGainValue > m_dGainValueMax)
+		{
+			m_dEditGainValue = m_dGainValueMax;
+		}
+		if (m_dEditGainValue < m_dGainValueMin)
+		{
+			m_dEditGainValue = m_dGainValueMin;
+		}
+		m_objFeatureControlPtr->GetFloatFeature("Gain")->SetValue(m_dEditGainValue);
+	}
+	catch (CGalaxyException& e)
+	{
+		m_dEditGainValue = dGainValueOld;
+		std::cout << e.what() << std::endl;
+	}
+	catch (std::exception& e)
+	{
+		m_dEditGainValue = dGainValueOld;
+		std::cout << e.what() << std::endl;
+	}
+
 }
 
 

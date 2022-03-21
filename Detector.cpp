@@ -1,23 +1,29 @@
 #include "Detector.h"
 
 
-float focalRange[2] = { 45.5, 47.5 }; // applied voltage, search range.
-float coarseStepSize = 0.5; // coarse search step
-float fineStepSize = 0.1; // fine search step
+float focalRange[2] = { 48.9, 50.9 }; // applied voltage, search range for trolley.
+//float coarseStepSize = 0.5; // coarse search step.
+float fineStepSize = 0.1; // fine search step.
 int maxFalseCount = 3; // used in bilateralSearch to determine whether trackAruco1 successfully.
-int coarseSleepTime = 50;
-int fineSleepTime = 1; // don't sleep.
+int coarseSleepTime = 200;
+int fineSleepTime = 100;
+int imgWidth = 2448;
+int imgHeight = 2048;
 
-Detector::Detector()
-	: accurateFocalVoltage((focalRange[0]+ focalRange[1])/2)
+Detector::Detector() //	: accurateFocalVoltage((focalRange[0]+ focalRange[1])/2)
+	: rvec({ 0.0,0.0,0.0 })
+	, tvec({ 0.0,0.0,0.0 })
+	, strFilePath("E:\\sjtu\\autoPark\\code\\autoPark\\autoPark\\poseEstimate\\")
 {
-	capturedImg.create(2048, 2448, CV_8UC1);
+	capturedImg.create(imgHeight, imgWidth, CV_8UC1);
+	//capturedImg = cv::imread("E:\\sjtu\\autoPark\\code\\calibrate\\accuracyTest\\4m\\15.bmp", CV_8UC1);
 	aruco1 = ArucoContainer();
 
 	initStatus = true;
 
 	// open caspian
 	casp.comConnect();
+	casp.setFocusVoltage(49.8);
 	if (!casp.getComStatus()) {
 		initStatus = false;
 	}
@@ -26,8 +32,11 @@ Detector::Detector()
 	if (!GxHandler.openDevice()) {
 		initStatus = false;
 	}
-	GxHandler.startSnap(); // GxHandler.imgFlow starts to update.
+	else {
+		GxHandler.startSnap(); // GxHandler.imgFlow starts to update.
+	}
 
+	Sleep(1000); // wait for camera ready.
 }
 
 Detector::~Detector()
@@ -43,14 +52,17 @@ Detector::~Detector()
 bool Detector::coarseToFine()
 {
 	// find max aruco 
-	casp.setFocusVoltage((focalRange[0]+focalRange[1])/2);
-	Sleep(200); // wait until focus ready.
+	float LocalBestFV = (focalRange[0] + focalRange[1]) / 2;
+	casp.setFocusVoltage(LocalBestFV);
+	Sleep(coarseSleepTime); // wait until focus ready.
 
 	cv::Ptr<cv::aruco::Dictionary> dictionary = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);
 	std::vector<std::vector<cv::Point2f>> markersCorners;
 	std::vector<int> markersId;
 	while (markersId.size() == 0) {
 		updateCapturedImg(GxHandler.getImgFlow());
+		//cv::Mat imgWatch(GxHandler.getImgFlow());
+		//Sleep(100000);
 		cv::aruco::detectMarkers(capturedImg, dictionary, markersCorners, markersId);
 	}
 	
@@ -67,47 +79,162 @@ bool Detector::coarseToFine()
 	}
 	aruco1 = ArucoContainer(markersId.at(maxId), markersCorners.at(maxId));
 
-	// coarse bilateral search, coarseStepSize 0.5v
-	float bestFocalVoltage;
-	float LocalBestFV = (focalRange[0] + focalRange[1]) / 2;
-	if (!bilateralSearch(LocalBestFV, coarseStepSize, coarseSleepTime, bestFocalVoltage)) {
+	// coarse bilateral search, fineStepSize 0.1v
+	//float bestFocalVoltage;
+	if (!bilateralSearch(LocalBestFV, fineStepSize, fineSleepTime)) {
 		return false;
 	}
+	std::cout << "Detector::coarseToFine search success!" << std::endl;
 
-	std::cout << "Detector::coarseToFine coarse search success!" << std::endl;
-
-	// fine bilateral search, fineStepSize 0.1v
-	LocalBestFV = bestFocalVoltage;
-	if (!bilateralSearch(LocalBestFV, fineStepSize, fineSleepTime, bestFocalVoltage)) {
-		return false;
-	}
-
-	std::cout << "Detector::coarseToFine fine search success!" << std::endl;
-
-	updateAccurateFV(bestFocalVoltage);
+	//updateAccurateFV(bestFocalVoltage);
 	return true;
 }
 
-bool Detector::trackNextCaptured() {
+bool Detector::estimatePose(bool firstEstimate) {
+	updateCapturedImg(GxHandler.getImgFlow());
 
-	// fine bilateral search, fineStepSize 0.1v
-	float bestFocalVoltage;
-	if (!bilateralSearch(accurateFocalVoltage, 0.2, fineSleepTime, bestFocalVoltage)) { // 试试看调大步长到 0.2
+	// get search region and resize scale.
+	cv::Rect searchRegion;
+	float resizeScale;
+	if (firstEstimate == true) {
+		searchRegion = cv::Rect(0, 0, imgWidth, imgHeight);
+		resizeScale = 1.0;
+	}
+	else {
+		searchRegion = getSearchRegion();
+		resizeScale = ceil(sqrt(150000.0 / searchRegion.area()) * 10.0) / 10.0; // 600 * 250
+	}
+	
+	// resize search region
+	cv::Mat ROI = capturedImg(searchRegion).clone();
+	cv::resize(ROI, ROI, cv::Size(), resizeScale, resizeScale);
+
+	// detect markers
+	cv::Ptr<cv::aruco::Dictionary> dictionary = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);
+	std::vector<std::vector<cv::Point2f>> markersCornersRaw;
+	cv::Ptr<cv::aruco::DetectorParameters> parameters = cv::aruco::DetectorParameters::create();
+	if (ROI.cols < 2000) {
+		parameters->minMarkerPerimeterRate = 0.2; // the minimum pixel size of a marker, specified relative to the maximum dimension of the input image.
+		parameters->maxMarkerPerimeterRate = 0.8; // the minimum pixel size of a marker...
+		parameters->minMarkerDistanceRate = 0.01; // Minimum distance between any pair of corners from two different markers.
+	}
+	else {
+		parameters->minMarkerPerimeterRate = 0.1;
+		parameters->maxMarkerPerimeterRate = 0.8;
+		parameters->minMarkerDistanceRate = 0.01;
+	}
+	std::vector<int> markersIdRaw;
+	cv::aruco::detectMarkers(ROI, dictionary, markersCornersRaw, markersIdRaw, parameters);
+
+	// if at least one marker detected
+	if (markersIdRaw.size() == 0) {
+		std::cout << "estimatePose() no marker..." << std::endl;
+		saveImage(ROI, "roi");
 		return false;
 	}
 
-	updateAccurateFV(bestFocalVoltage);
+	// delete outer marker.
+	std::vector<std::vector<cv::Point2f>> markersCornersScaled;
+	std::vector<int> markersId;
+	auto first = markersIdRaw.begin();
+	auto ff = markersCornersRaw.begin();
+	while (first != markersIdRaw.end()) {
+		bool unique = true;
+		auto second = first + 1;
+		auto ss = ff + 1;
+		while (second != markersIdRaw.end()) {
+			if (*second == *first) {
+				unique = false;
+				if ((fabs(ff->at(0).x - ff->at(1).x) + fabs(ff->at(0).y - ff->at(3).y)) > (fabs(ss->at(0).x - ss->at(1).x) + fabs(ss->at(0).y - ss->at(3).y))) {
+					markersId.emplace_back(*second);
+					markersCornersScaled.emplace_back(*ss);
+				}
+				else {
+					markersId.emplace_back(*first);
+					markersCornersScaled.emplace_back(*ff);
+				}
+				markersIdRaw.erase(second);
+				markersCornersRaw.erase(ss);
+				break;
+			}
+			second++;
+			ss++;
+		}
+		if (unique) {
+			markersId.emplace_back(*first);
+			markersCornersScaled.emplace_back(*ff);
+		}
+		first++;
+		ff++;
+	}
+	cv::aruco::drawDetectedMarkers(ROI, markersCornersScaled, markersId); // draw the results.
+	saveImage(ROI, "roi");
+	//cv::Mat temp_image = capturedImg;
+	ArucoContainers markerCorners;
+	int mCSi = 0;
+	for (const std::vector<cv::Point2f>& mCS : markersCornersScaled) {
+		std::vector<cv::Point2f > mC;
+		mC.emplace_back((mCS.at(0).x + 1.0) / resizeScale - 1.0 + static_cast<float>(searchRegion.x), (mCS.at(0).y + 1.0) / resizeScale - 1.0 + static_cast<float>(searchRegion.y));
+		mC.emplace_back((mCS.at(1).x + 1.0) / resizeScale - 1.0 + static_cast<float>(searchRegion.x), (mCS.at(1).y + 1.0) / resizeScale - 1.0 + static_cast<float>(searchRegion.y));
+		mC.emplace_back((mCS.at(2).x + 1.0) / resizeScale - 1.0 + static_cast<float>(searchRegion.x), (mCS.at(2).y + 1.0) / resizeScale - 1.0 + static_cast<float>(searchRegion.y));
+		mC.emplace_back((mCS.at(3).x + 1.0) / resizeScale - 1.0 + static_cast<float>(searchRegion.x), (mCS.at(3).y + 1.0) / resizeScale - 1.0 + static_cast<float>(searchRegion.y));
+		ArucoContainer mCTemp(markersId[mCSi], mC);
+		markerCorners.emplace_back(mCTemp);
+		mCSi++;
+	}
+
+	// subpixel location
+	ArucoContainers subpixelMarkers=subPixelCorners(markerCorners);
+
+	// pose estimate
+	std::vector<cv::Point3f> pointsM;
+	std::vector<cv::Point2f> pointsP;
+	for (int i = 0; i < estimateIds.size(); i++) {
+		std::vector<int>::iterator iter = std::find(markersId.begin(), markersId.end(), estimateIds[i]);
+		if (iter != markersId.end()) {
+			int idNumTemp = std::distance(markersId.begin(), iter);
+
+			Eigen::Vector4f pointX_0(-markerSize / 2, markerSize / 2, 0.0, 1.0);
+			Eigen::Vector4f pointX_1(markerSize / 2, markerSize / 2, 0.0, 1.0);
+			Eigen::Vector4f pointX_2(markerSize / 2, -markerSize / 2, 0.0, 1.0);
+			Eigen::Vector4f pointX_3(-markerSize / 2, -markerSize / 2, 0.0, 1.0);
+			Eigen::Vector4f pointM_0 = poseRelativeX[i] * pointX_0;
+			Eigen::Vector4f pointM_1 = poseRelativeX[i] * pointX_1;
+			Eigen::Vector4f pointM_2 = poseRelativeX[i] * pointX_2;
+			Eigen::Vector4f pointM_3 = poseRelativeX[i] * pointX_3;
+			pointsM.emplace_back(pointM_0(0), pointM_0(1), pointM_0(2));
+			pointsM.emplace_back(pointM_1(0), pointM_1(1), pointM_1(2));
+			pointsM.emplace_back(pointM_2(0), pointM_2(1), pointM_2(2));
+			pointsM.emplace_back(pointM_3(0), pointM_3(1), pointM_3(2));
+
+			pointsP.emplace_back(subpixelMarkers.at(idNumTemp).corners.at(0));
+			pointsP.emplace_back(subpixelMarkers.at(idNumTemp).corners.at(1));
+			pointsP.emplace_back(subpixelMarkers.at(idNumTemp).corners.at(2));
+			pointsP.emplace_back(subpixelMarkers.at(idNumTemp).corners.at(3));
+		}
+	}
+	cv::Vec3d rvecTemp, tvecTemp;
+	cv::solvePnP(pointsM, pointsP, cameraMatrix, distCoeffs, rvecTemp, tvecTemp, false, cv::SOLVEPNP_EPNP); // r and t: Tcam_M
+	update_rt(rvecTemp, tvecTemp);
+
+	// update focal voltage and camera parameters.
+	/*float currentBestFV = fromDistance2FV();
+	casp.setFocusVoltage(currentBestFV);*/
+
+	// draw results
+	showResult(pointsM, pointsP);
+
 	return true;
 }
 
 // bestFocalVoltage is the best focal voltage in current step size
 // we assume that the input currentFocalVoltage == casp.getFocusVoltage.
-bool Detector::bilateralSearch(float currentFocalVoltage, float stepSize, int sleepTime, float& bestFocalVoltage)
+bool Detector::bilateralSearch(float currentFocalVoltage, float stepSize, int sleepTime)
 {
 	int searchDirection = 0;
 	float bestSharpness = 0;
 
-	if (abs(currentFocalVoltage - casp.getFocusVoltage()) > (0.8 * fineStepSize)) { // min step size is 0.1
+	if (fabs(currentFocalVoltage - casp.getFocusVoltage()) > (0.8 * fineStepSize)) { // min step size is 0.1
 		std::cout << "something went wrong in Detector::bilateralSearch." << std::endl;
 		return false;
 	}
@@ -189,7 +316,7 @@ bool Detector::bilateralSearch(float currentFocalVoltage, float stepSize, int sl
 
 	// search towards searchDirection, and find the best focal voltage
 	if (searchDirection == 0) {
-		bestFocalVoltage = currentFocalVoltage;
+		//bestFocalVoltage = currentFocalVoltage;
 		casp.setFocusVoltage(currentFocalVoltage); // set next focus voltage.
 		Sleep(sleepTime); // Sleep time may be unnecessary? TODO
 		return true;
@@ -222,7 +349,7 @@ bool Detector::bilateralSearch(float currentFocalVoltage, float stepSize, int sl
 		else {
 			casp.setFocusVoltage(currentFocalVoltage);
 			Sleep(sleepTime);
-			bestFocalVoltage = currentFocalVoltage;
+			//bestFocalVoltage = currentFocalVoltage;
 			break;
 		}
 	}
@@ -247,7 +374,7 @@ bool Detector::trackAruco1()
 
 		std::vector<std::vector<cv::Point2f>> markersCorners;
 		std::vector<int> markersId;
-		cv::Mat imgTemp(capturedImg);
+		cv::Mat imgTemp(capturedImg); // test
 		cv::Mat imgROI(capturedImg, roiRect);
 		cv::aruco::detectMarkers(imgROI, dictionary, markersCorners, markersId);
 		
@@ -307,7 +434,309 @@ float Detector::detectSharpness() const
 	return sharpness;
 }
 
+Corner Detector::rectifyOneCorner(const Corner& corner_) const {
+	Corner cornerRec;
+
+	float x_uv, y_uv;
+	x_uv = (corner_.x - cameraMatrix.at<float>(0, 2)) / cameraMatrix.at<float>(0, 0);
+	y_uv = (corner_.y - cameraMatrix.at<float>(1, 2)) / cameraMatrix.at<float>(1, 1);
+	Corner pixel_ud = Corner(x_uv, y_uv);
+
+	float r_xy = pixel_ud.x * pixel_ud.x + pixel_ud.y * pixel_ud.y;
+	float k1 = distCoeffs.at<float>(0,0);
+	float k2 = distCoeffs.at<float>(1,0);
+	float p1 = distCoeffs.at<float>(2,0);
+	float p2 = distCoeffs.at<float>(3,0);
+	float x_d = pixel_ud.x * (1 + k1 * r_xy + k2 * r_xy * r_xy) + 2 * p1 * pixel_ud.x * pixel_ud.y + p2 * (r_xy + 2 * pixel_ud.x * pixel_ud.x);
+	float y_d = pixel_ud.y * (1 + k1 * r_xy + k2 * r_xy * r_xy) + 2 * p2 * pixel_ud.x * pixel_ud.y + p1 * (r_xy + 2 * pixel_ud.y * pixel_ud.y);
+
+	cornerRec.x = cameraMatrix.at<float>(0, 0) * x_d + cameraMatrix.at<float>(0, 2);
+	cornerRec.y = cameraMatrix.at<float>(1, 1) * y_d + cameraMatrix.at<float>(1, 2);
+	
+	return cornerRec;
+}
 
 
+cv::Rect Detector::getSearchRegion() const {
 
+	std::vector<cv::Point3f> pointsM;
+	for (const Eigen::Matrix4f& poseM_X : poseRelativeX) {
+		Eigen::Vector4f pointX_0(-markerSize / 2, markerSize / 2, 0.0, 1.0);
+		Eigen::Vector4f pointX_1(markerSize / 2, markerSize / 2, 0.0, 1.0);
+		Eigen::Vector4f pointX_2(markerSize / 2, -markerSize / 2, 0.0, 1.0);
+		Eigen::Vector4f pointX_3(-markerSize / 2, -markerSize / 2, 0.0, 1.0);
+		Eigen::Vector4f pointM_0 = poseM_X * pointX_0;
+		Eigen::Vector4f pointM_1 = poseM_X * pointX_1;
+		Eigen::Vector4f pointM_2 = poseM_X * pointX_2;
+		Eigen::Vector4f pointM_3 = poseM_X * pointX_3;
+		pointsM.emplace_back(pointM_0(0), pointM_0(1), pointM_0(2));
+		pointsM.emplace_back(pointM_1(0), pointM_1(1), pointM_1(2));
+		pointsM.emplace_back(pointM_2(0), pointM_2(1), pointM_2(2));
+		pointsM.emplace_back(pointM_3(0), pointM_3(1), pointM_3(2));
+	}
+	Corners reproPoints;
+	reproPoints = getReprojectImagePoint(pointsM);
 
+	float max_x = 0;
+	float max_y = 0;
+	float min_x = imgWidth;
+	float min_y = imgHeight;
+	for (const Corner& rp : reproPoints) {
+		if (rp.x < min_x) {
+			min_x = rp.x;
+		}
+
+		if (rp.x > max_x) {
+			max_x = rp.x;
+		}
+
+		if (rp.y < min_y) {
+			min_y = rp.y;
+		}
+
+		if (rp.y > max_y) {
+			max_y = rp.y;
+		}
+	}
+
+	int width = floor(max_x - min_x);
+	int height = floor(max_y - min_y);
+	int init_x = ceil(std::max<float>({ min_x - width / 2, 0.0 }));
+	int init_y = ceil(std::max<float>({ min_y - height / 2, 0.0 }));
+	cv::Rect searchRegion(init_x, init_y, std::min<int>({ imgWidth - init_x, width * 2 }), std::min<int>({ imgHeight - init_y, height * 2 }));
+
+	return searchRegion;
+}
+
+Eigen::Matrix4f Detector::getTC_M() const {
+	Eigen::Matrix4f TC_M;
+	cv::Mat rotm;
+	cv::Rodrigues(rvec, rotm);
+	TC_M << rotm.at<float>(0, 0), rotm.at<float>(0, 1), rotm.at<float>(0, 2), tvec(0),
+		rotm.at<float>(1, 0), rotm.at<float>(1, 1), rotm.at<float>(1, 2), tvec(1),
+		rotm.at<float>(2, 0), rotm.at<float>(2, 1), rotm.at<float>(2, 2), tvec(2),
+		0.0, 0.0, 0.0, 1.0;
+	return TC_M;
+}
+
+Corners Detector::getReprojectImagePoint(const std::vector<cv::Point3f>& object3DPoints) const {
+	cv::Mat reprojectedPoints;
+	cv::InputArray object3DPoints_x = (cv::InputArray)object3DPoints;
+	cv::projectPoints(object3DPoints, rvec, tvec, cameraMatrix, distCoeffs, reprojectedPoints);
+
+	Corners corners_res = Corners();
+	size_t n = object3DPoints_x.rows() * object3DPoints_x.cols();
+	for (size_t i = 0; i < n; i++)
+	{
+		corners_res.push_back(Corner(reprojectedPoints.at<cv::Vec2f>(i)[0], reprojectedPoints.at<cv::Vec2f>(i)[1]));
+	}
+
+	return corners_res;
+}
+
+/*get subpixel corners*/
+ArucoContainers Detector::subPixelCorners(const ArucoContainers& intACs) const {
+	
+	// corner region size.
+	int HalfH = 4;
+	int HalfW = 4;
+	int winH = HalfH * 2 + 1;
+	int winW = HalfW * 2 + 1;
+	int winCnt = winH * winW;
+	// iteration exit criteria
+	int max_iters = 5;
+	float eps = 0.000001; // 1e-6
+
+	// gaussian weight mask
+	cv::Mat weightMask = cv::Mat(winH, winW, CV_32FC1);
+	for (int i = 0; i < winH; i++)
+	{
+		for (int j = 0; j < winW; j++)
+		{
+			float wx = (float)(j - HalfW) / HalfW;
+			float wy = (float)(i - HalfH) / HalfH;
+			float vx = exp(-wx * wx);
+			float vy = exp(-wy * wy);
+			weightMask.at<float>(i, j) = (float)(vx * vy);
+		}
+	}
+
+	// for all the points
+	ArucoContainers floatACs;
+	for (const ArucoContainer& intAC : intACs) {
+		std::vector<cv::Point2f > mC;
+
+		for (const cv::Point2f& currPoint : intAC.corners) {
+
+			double a, b, c, bb1, bb2;
+			cv::Mat subImg = cv::Mat::zeros(winH + 2, winW + 2, CV_8UC1); // +2 for sobel operation.
+			cv::Point2f iterPoint = currPoint;
+
+			// start iteration
+			int iterCnt = 0;
+			float err = 1.0;
+			while (err > eps && iterCnt < max_iters) {
+				a = b = c = bb1 = bb2 = 0;
+
+				int initx = int(iterPoint.x + 0.5f) - (winW + 1) / 2;
+				int inity = int(iterPoint.y + 0.5f) - (winH + 1) / 2;
+				if (initx < 0 || inity < 0 || (initx + winW + 2) >= imgWidth || (inity + winH + 2) >= imgHeight) {
+					break;
+				}
+				cv::Rect imgROI(initx, inity, winW + 2, winH + 2);
+				subImg = capturedImg(imgROI).clone();
+
+				for (int i = 0; i < winH; i++) {
+					for (int j = 0; j < winW; j++) {
+						// read gaussian weight.
+						double m = weightMask.at<float>(i, j);
+						// soble operation.
+						double sobelx = static_cast<double>(subImg.at<uchar>(i + 1, j + 2) - subImg.at<uchar>(i + 1, j));
+						double sobely = static_cast<double>(subImg.at<uchar>(i + 2, j + 1) - subImg.at<uchar>(i, j + 1));
+						double gxx = sobelx * sobelx * m;
+						double gxy = sobelx * sobely * m;
+						double gyy = sobely * sobely * m;
+						a += gxx;
+						b += gxy;
+						c += gyy;
+						// p_i position.
+						double px = static_cast<double>(j - HalfW);
+						double py = static_cast<double>(i - HalfH);
+
+						bb1 += gxx * px + gxy * py;
+						bb2 += gxy * px + gyy * py;
+					}
+				}
+				double det = a * c - b * b;
+				if (fabs(det) <= DBL_EPSILON * DBL_EPSILON)
+					break;
+				// inverse
+				double invA = c / det;
+				double invC = a / det;
+				double invB = -b / det;
+				// new point
+				cv::Point2f newPoint;
+				newPoint.x = (float)(initx + HalfW + 1 + invA * bb1 + invB * bb2);
+				newPoint.y = (float)(inity + HalfH + 1 + invB * bb1 + invC * bb2);
+				// update err.
+				err = (newPoint.x - iterPoint.x) * (newPoint.x - iterPoint.x) + (newPoint.y - iterPoint.y) * (newPoint.y - iterPoint.y);
+				// update new point.
+				iterPoint = newPoint;
+				iterCnt++;
+				if (iterPoint.x < 0 || iterPoint.x >= imgWidth || iterPoint.y < 0 || iterPoint.y >= imgHeight)
+					break;
+			}
+
+			// verify convergence
+			if (fabs(iterPoint.x - currPoint.x) > HalfW || fabs(iterPoint.y - currPoint.y) > HalfH) {
+				iterPoint = currPoint;
+			}
+			
+			// save the results.
+			mC.emplace_back(iterPoint);
+		}
+
+		ArucoContainer mCTemp(intAC.id, mC);
+		floatACs.emplace_back(mCTemp);
+	}
+
+	return floatACs;
+}
+
+float Detector::fromDistance2FV() const {
+	float bestFV;
+	bestFV = 49.8;
+	return bestFV;
+}
+
+void Detector::showResult(const std::vector<cv::Point3f>& pointsM, const std::vector<cv::Point2f>& pointsP) const {
+
+	float cost = 0.0;
+
+	Corners reproPoints;
+	reproPoints = getReprojectImagePoint(pointsM);
+	cv::Mat imgResized;
+	cv::cvtColor(capturedImg, imgResized, cv::COLOR_GRAY2BGR); // CV_8UC3
+	
+	std::vector<cv::Point3f> coordi_crs3d;
+	coordi_crs3d.emplace_back(0.0, 0.0, 0.0);
+	coordi_crs3d.emplace_back(60.0, 0.0, 0.0);
+	coordi_crs3d.emplace_back(0.0, 60.0, 0.0);
+	coordi_crs3d.emplace_back(0.0, 0.0, 60.0);
+	Corners coordi_crs;
+	coordi_crs = getReprojectImagePoint(coordi_crs3d);
+
+	/*predefined parameters*/
+	double resize_scale = 0.3;
+	double text_scale = 1.5;
+	int point_radius = 8;
+	int line_width = 4;
+	// r, g, b
+	cv::Scalar color_arr[5] = { cv::Scalar(0, 0, 255), cv::Scalar(0, 255, 0), cv::Scalar(255, 0, 0), cv::Scalar(192, 112, 0), cv::Scalar(0, 255, 255) };
+	
+	// draw corners
+	for (int i = 0; i < pointsP.size(); i++) {
+		cv::circle(imgResized, Corner(reproPoints.at(i).x, reproPoints.at(i).y), point_radius, color_arr[3], -1);
+		cost += pow(reproPoints.at(i).x - pointsP.at(i).x, 2) + pow(reproPoints.at(i).y - pointsP.at(i).y, 2);
+	}
+	cost = sqrt(cost / pointsP.size());
+
+	// draw coordinate system
+	if (coordi_crs.size() == 4)
+	{
+		if ((coordi_crs.at(0).x > 0 && coordi_crs.at(0).x < imgResized.cols - 1) &&
+			(coordi_crs.at(0).y > 0 && coordi_crs.at(0).y < imgResized.rows - 1) &&
+			(coordi_crs.at(1).x > 0 && coordi_crs.at(1).x < imgResized.cols - 1) &&
+			(coordi_crs.at(1).y > 0 && coordi_crs.at(1).y < imgResized.rows - 1) &&
+			(coordi_crs.at(2).x > 0 && coordi_crs.at(2).x < imgResized.cols - 1) &&
+			(coordi_crs.at(2).y > 0 && coordi_crs.at(2).y < imgResized.rows - 1) &&
+			(coordi_crs.at(3).x > 0 && coordi_crs.at(3).x < imgResized.cols - 1) &&
+			(coordi_crs.at(3).y > 0 && coordi_crs.at(3).y < imgResized.rows - 1))
+		{
+			cv::line(imgResized, Corner(coordi_crs.at(0).x, coordi_crs.at(0).y), Corner(coordi_crs.at(1).x, coordi_crs.at(1).y), color_arr[0], line_width);
+			cv::line(imgResized, Corner(coordi_crs.at(0).x, coordi_crs.at(0).y), Corner(coordi_crs.at(2).x, coordi_crs.at(2).y), color_arr[1], line_width);
+			cv::line(imgResized, Corner(coordi_crs.at(0).x, coordi_crs.at(0).y), Corner(coordi_crs.at(3).x, coordi_crs.at(3).y), color_arr[2], line_width);
+		}
+	}
+
+	std::string str1, str2;
+	str1 = "position [" + std::to_string(tvec[0]) + "," + std::to_string(tvec[1]) + "," + std::to_string(tvec[2]) +
+		"], orientation [" + std::to_string(rvec[0]) + "," + std::to_string(rvec[1]) + "," + std::to_string(rvec[2]) + "]";
+	str2 = "cost: " + std::to_string(cost);
+
+	cv::putText(imgResized, str1, cv::Point_<int>(10, 50), cv::FONT_HERSHEY_COMPLEX, text_scale, color_arr[4], 2);
+	cv::putText(imgResized, str2, cv::Point_<int>(10, 110), cv::FONT_HERSHEY_COMPLEX, text_scale, color_arr[4], 2);
+	cv::resize(imgResized, imgResized, cv::Size(), resize_scale, resize_scale);
+
+	cv::imshow("repro", imgResized);
+	cv::waitKey(1);
+	saveImage(imgResized, "repro");
+	return;
+}
+
+void Detector::saveImage(const cv::Mat& image, const std::string& strPrefix) const {
+	std::string fullName;
+	SYSTEMTIME sysTime;
+	GetLocalTime(&sysTime);
+
+	std::string str_minute, str_second, str_millisecond;
+	str_minute = std::to_string(sysTime.wMinute);
+	if (str_minute.length() == 1) {
+		str_minute = "0" + str_minute;
+	}
+	str_second = std::to_string(sysTime.wSecond);
+	if (str_second.length() == 1) {
+		str_second = "0" + str_second;
+	}
+	str_millisecond = std::to_string(sysTime.wMilliseconds);
+	if (str_millisecond.length() == 1) {
+		str_millisecond = "00" + str_millisecond;
+	}
+	else if (str_millisecond.length() == 2) {
+		str_millisecond = "0" + str_millisecond;
+	}
+		
+	fullName = strFilePath + strPrefix + str_minute + str_second + str_millisecond + ".bmp";
+	cv::imwrite(fullName, image);
+	return;
+}

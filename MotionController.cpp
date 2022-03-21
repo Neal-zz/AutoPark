@@ -51,7 +51,7 @@ MatrixPath MotionController::fromDesired2FactualPath(const MatrixPath& desiredPa
 	outfile.open("fD2FPData.txt", std::ios::trunc | std::ios::out);
 
 	// make sure that the desiredPath matches the cartIniPos and the tarPos.
-	if (abs(iniPosIn(0)-desiredPath(0, 0))>0.001 || abs(iniPosIn(1)-desiredPath(0, 1))>0.001 || abs(tarPosIn(0)-desiredPath(19, 0))>0.001 || abs(tarPosIn(1)-desiredPath(19, 1))>0.001)
+	if (fabs(iniPosIn(0)-desiredPath(0, 0))>0.001 || fabs(iniPosIn(1)-desiredPath(0, 1))>0.001 || fabs(tarPosIn(0)-desiredPath(19, 0))>0.001 || fabs(tarPosIn(1)-desiredPath(19, 1))>0.001)
 	{
 		std::cerr << "iniPosIn or tarPosIn doesn't match the desiredPath!" << std::endl;
 		return factualPath;
@@ -105,7 +105,7 @@ MatrixPath MotionController::fromDesired2FactualPath(const MatrixPath& desiredPa
 		// comute next velocity.
 		/* kp=1*/
 		Eigen::Vector2d cartVelNi(std::min(disErr, cartPara.linVelLim),
-			abs(angErr)>cartPara.angVelLim ? cartPara.angVelLim*angErr / abs(angErr) : angErr);
+			fabs(angErr)>cartPara.angVelLim ? cartPara.angVelLim*angErr / fabs(angErr) : angErr);
 		if ((cartVelNi(0) - cartVeli(0)) * cartPara.communFreq > cartPara.linAccLim)
 			cartVelNi(0) = cartVeli(0) + cartPara.linAccLim / cartPara.communFreq;
 		else if ((cartVelNi(0) - cartVeli(0)) * cartPara.communFreq < -cartPara.linAccLim)

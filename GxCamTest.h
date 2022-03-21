@@ -22,6 +22,9 @@ typedef struct ImgMutex {
 		return true;
 	}
 	bool unlock() {
+		if (mutex == 1) {
+			std::cout << "imgMutex Error!!!" << std::endl;
+		}
 		mutex = 1;
 		return true;
 	}
