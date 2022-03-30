@@ -1,37 +1,13 @@
 #pragma once
 
 #include "GalaxyIncludes.h"
+
 #include <opencv2/opencv.hpp>
 #include <direct.h>
 #include <io.h>
+#include <thread>
+#include <mutex>
 
-typedef struct ImgMutex {
-
-	ImgMutex()
-		: mutex(1)
-	{
-
-	}
-
-	bool lock() {
-		if (mutex == 0) { 
-			//std::cout << "threads collide, i'm waiting...\n";
-			return false; 
-		}
-		mutex = 0;
-		return true;
-	}
-	bool unlock() {
-		if (mutex == 1) {
-			std::cout << "imgMutex Error!!!" << std::endl;
-		}
-		mutex = 1;
-		return true;
-	}
-
-	int mutex;
-	cv::Mat imgFlow;
-}ImgMutex;
 
 class GxCamTest
 {
@@ -124,6 +100,7 @@ private:
 	std::string m_strSavePath; // Í¼Ïñ±£´æÂ·¾¶¡£
 
 	int m_iImgNum;
-	ImgMutex imgMutex;
+	cv::Mat imgFlow;
+	std::mutex img_mu;
 	//std::chrono::system_clock::time_point startGx;
 };

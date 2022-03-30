@@ -1,15 +1,17 @@
 #pragma once
 
+#include "config.h"
 #include "ComCaspTest.h"
 #include "GxCamTest.h"
-#include "config.h"
 
 #include <algorithm>
 #include <opencv2/opencv.hpp>
 #include <opencv2/aruco.hpp>
 #include <Eigen/Core>
 
-typedef struct ArucoContainer
+class MotionController;
+
+struct ArucoContainer
 {
 	ArucoContainer()
 		: id(-1), area(0,0,0,0)
@@ -26,11 +28,10 @@ typedef struct ArucoContainer
 
 	void updateArea() {
 		int miny, minx, maxy, maxx;
-		std::max({ corners.at(0).y, corners.at(1).y });
-		maxy = ceil(std::max({ corners.at(0).y, corners.at(1).y, corners.at(2).y, corners.at(3).y }));
-		miny = floor(std::min({ corners.at(0).y, corners.at(1).y, corners.at(2).y, corners.at(3).y }));
-		maxx = ceil(std::max({ corners.at(0).x, corners.at(1).x, corners.at(2).x, corners.at(3).x }));
-		minx = floor(std::min({ corners.at(0).x, corners.at(1).x, corners.at(2).x, corners.at(3).x }));
+		maxy = ceil((std::max)({ corners.at(0).y, corners.at(1).y, corners.at(2).y, corners.at(3).y }));
+		miny = floor((std::min)({ corners.at(0).y, corners.at(1).y, corners.at(2).y, corners.at(3).y }));
+		maxx = ceil((std::max)({ corners.at(0).x, corners.at(1).x, corners.at(2).x, corners.at(3).x }));
+		minx = floor((std::min)({ corners.at(0).x, corners.at(1).x, corners.at(2).x, corners.at(3).x }));
 
 		area = cv::Rect(minx, miny, maxx - minx + 1, maxy - miny + 1);
 	}
@@ -38,7 +39,7 @@ typedef struct ArucoContainer
 	int id; // aruco id
 	cv::Rect area; // aruco area. Double area = ROI search region.
 	std::vector<cv::Point2f> corners; // aruco corners
-}ArucoContainer;
+};
 using ArucoContainers = std::vector<ArucoContainer>;
 
 using Corner = cv::Point_<float>;
@@ -47,16 +48,19 @@ using Corners = std::vector<Corner>;
 class Detector
 {
 public:
-	Detector();
-	~Detector();
+	Detector(std::shared_ptr<ComCaspTest> caspian, std::shared_ptr<GxCamTest> GxCamera);
 
-	bool coarseToFine();
-	bool estimatePose(bool firstEstimate=false);
+	bool coarseToFine(const float& searchFVMin, const float& searchFVMax);
+	bool estimatePose(bool firstEstimate = false);
 
-	bool getInitStatus() const { return initStatus; };
 	Corner rectifyOneCorner(const Corner& corner) const; // from image points to true points.
-	Eigen::Matrix4f getTC_M() const; // Tcamera_marker.
+	
+	Eigen::Matrix4f getTC_M() const;  // Tcamera_marker.
+	pose3d getPose() const { return markerPose; };  // posecamer_marker.
+	
+	std::vector<cv::Point3f> registerPlane();
 
+	//pose3d detectTrolley();
 
 private:
 	void updateCapturedImg(const cv::Mat& imgFlow) { capturedImg = imgFlow; };
@@ -68,14 +72,15 @@ private:
 	cv::Rect getSearchRegion() const;
 	Corners getReprojectImagePoint(const std::vector<cv::Point3f>& object3DPoints) const;
 	ArucoContainers subPixelCorners(const ArucoContainers& intACs) const;
-	void update_rt(const cv::Vec3d& rvecTemp, const cv::Vec3d& tvecTemp) { rvec = rvecTemp; tvec = tvecTemp; };
+	void update_rt(const cv::Vec3d& rvecTemp, const cv::Vec3d& tvecTemp) { markerPose.rvec = rvecTemp; markerPose.tvec = tvecTemp; };
 	float fromDistance2FV() const;
 	void showResult(const std::vector<cv::Point3f>& pointsM, const std::vector<cv::Point2f>& pointsP) const;
 	void saveImage(const cv::Mat& imagem, const std::string& strPrefix = "") const;
+	void drawArucoDetectedMarkers(cv::Mat& ROI, const ArucoContainers& subpixelMarkers) const;
 
-	bool initStatus; // whether camera and caspian opened successfully?
-	ComCaspTest casp; // caspian handler
-	GxCamTest GxHandler; // camera handler
+	std::shared_ptr<ComCaspTest> caspHandler; // caspian handler
+	std::shared_ptr<GxCamTest> GxHandler; // camera handler
+
 	std::string strFilePath;
 
 	cv::Mat capturedImg;
@@ -84,21 +89,16 @@ private:
 	//ArucoContainers arucos;
 
 	//float accurateFocalVoltage; // current best Focal Voltage, used for trackNextCaptured().
-	
+
 	// pose, Tcam_Marker
-	cv::Vec3d rvec;
-	cv::Vec3d tvec;
+	pose3d markerPose;
+	//cv::Vec3d rvec;
+	//cv::Vec3d tvec;
+
+	std::mutex tT_mutex;
+	std::vector<cv::Point3f> trolleyTrajectory;
+	friend class MotionController;
 };
-
-
-
-
-
-
-
-
-
-
 
 
 

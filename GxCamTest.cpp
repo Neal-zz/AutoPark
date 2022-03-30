@@ -13,8 +13,8 @@ GxCamTest::GxCamTest()
 	, m_strBalanceWhiteAutoMode("Off")
 	, m_pSampleCaptureEventHandle(NULL)
 	, m_bCheckSaveBmp(false)
-	, m_dEditShutterValue(2000) // 曝光
-	, m_dEditGainValue(10000) // 增益
+	, m_dEditShutterValue(20000) // 曝光 20~1e6 // 20000 比较不容易模糊
+	, m_dEditGainValue(10) // 增益 0~23.9  // 增益越大，噪声越大
 	, m_dEditBalanceRatioValue(0)
 	, m_dShutterValueMax(0)
 	, m_dShutterValueMin(0)
@@ -372,9 +372,11 @@ void GxCamTest::writeImgFlow(CImageDataPointer& objImageDataPointer)
 		pRaw8Buffer = objImageDataPointer->ConvertToRaw8(GX_BIT_0_7);
 		memcpy(imgTemp.data, pRaw8Buffer, (objImageDataPointer->GetHeight()) * (objImageDataPointer->GetWidth()));
 		//std::cout << imgTemp.size() << std::endl;
-		while (!imgMutex.lock()) {}
-		imgMutex.imgFlow = imgTemp;
-		imgMutex.unlock();
+
+		{
+			std::lock_guard<std::mutex> locker(img_mu);
+			imgFlow = imgTemp.clone();
+		}
 
 		cv::resize(imgTemp, imgTemp, cv::Size(), 0.3, 0.3);
 		cv::imshow("raw", imgTemp);
@@ -422,9 +424,10 @@ void GxCamTest::SavePicture(CImageDataPointer& objImageDataPointer)
 
 cv::Mat GxCamTest::getImgFlow() {
 	cv::Mat imgTemp;
-	while (!imgMutex.lock()) { } // wait until successfully lock
-	imgTemp = imgMutex.imgFlow;
-	imgMutex.unlock();
+	{
+		std::lock_guard<std::mutex> locker(img_mu);
+		imgTemp = imgFlow.clone();
+	}
 	return imgTemp;
 }
 
@@ -486,10 +489,36 @@ void GxCamTest::__InitParam()
 	m_dBalanceWhiteRatioMax = m_objFeatureControlPtr->GetFloatFeature("BalanceRatio")->GetMax();
 	m_dBalanceWhiteRatioMin = m_objFeatureControlPtr->GetFloatFeature("BalanceRatio")->GetMin();
 
+	double dShutterValueOld = m_dEditShutterValue;
+	try
+	{
+		//判断输入值是否在曝光时间范围内，如果不是则设置与其最近的边界值
+		if (m_dEditShutterValue > m_dShutterValueMax)
+		{
+			m_dEditShutterValue = m_dShutterValueMax;
+		}
+		if (m_dEditShutterValue < m_dShutterValueMin)
+		{
+			m_dEditShutterValue = m_dShutterValueMin;
+		}
+
+		m_objFeatureControlPtr->GetFloatFeature("ExposureTime")->SetValue(m_dEditShutterValue);
+	}
+	catch (CGalaxyException& e)
+	{
+		m_dEditShutterValue = dShutterValueOld;
+		std::cout << e.what() << std::endl;
+	}
+	catch (std::exception& e)
+	{
+		m_dEditShutterValue = dShutterValueOld;
+		std::cout << e.what() << std::endl;
+	}
+
 	double dGainValueOld = m_dEditGainValue;
 	try
 	{
-		//判断输入值是否在增益值范围内，如果不是则设置与其最近的边界值
+		//判断输入值是否在曝光时间范围内，如果不是则设置与其最近的边界值
 		if (m_dEditGainValue > m_dGainValueMax)
 		{
 			m_dEditGainValue = m_dGainValueMax;
@@ -498,6 +527,7 @@ void GxCamTest::__InitParam()
 		{
 			m_dEditGainValue = m_dGainValueMin;
 		}
+
 		m_objFeatureControlPtr->GetFloatFeature("Gain")->SetValue(m_dEditGainValue);
 	}
 	catch (CGalaxyException& e)
@@ -510,7 +540,6 @@ void GxCamTest::__InitParam()
 		m_dEditGainValue = dGainValueOld;
 		std::cout << e.what() << std::endl;
 	}
-
 }
 
 

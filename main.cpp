@@ -28,180 +28,185 @@ auto toc = [](std::chrono::system_clock::time_point start, const std::string& na
 };
 
 // input cartVel, get the motion trace.
-void forwardControl()
-{
-	CartPara cartTest;
-	cartTest.wheelsRadius = 0.15;
-	cartTest.wheelsDistance = 0.4;
-	cartTest.linVelLim = 1.2;
-	cartTest.linAccLim = 0.6; 
-	cartTest.angVelLim = 1.5;
-	cartTest.angAccLim = 0.8;
-	cartTest.communFreq = 10;
+//void forwardControlTest() {
+//	CartPara cartTest;
+//	cartTest.wheelsRadius = 50;
+//	cartTest.wheelsDistance = 560;
+//	cartTest.linVelLim = 50;
+//	cartTest.linAccLim = 20;
+//	cartTest.angVelLim = 0.1;
+//	cartTest.angAccLim = 0.04;
+//	cartTest.communFreq = 10;
+//
+//	MotionController mC(cartTest);
+//	mC.forwardControl();
+//}
 
-	MotionController mC(cartTest);
-	mC.updateCartIniPos(Eigen::Vector3d::Zero());
-	Eigen::Vector2d cartVel(-0.5, 0.05);
-	mC.updateCartCurrVel(cartVel);
 
-	std::ofstream outfile;
-	outfile.open("fCData.txt", std::ios::trunc | std::ios::out);
+void closedLoopControlTest() {
+	/* create motionController*/
+	CartPara cartPara;
+	cartPara.wheelsRadius = 50;
+	cartPara.wheelsDistance = 560;
+	cartPara.linVelLim = 50;
+	cartPara.linAccLim = 20;
+	cartPara.angVelLim = 0.1;
+	cartPara.angAccLim = 0.04;
+	cartPara.communFreq = 10;
+	cartPara.r = 220;
+	cartPara.l1 = 400;
+	cartPara.w = 600;
+	cartPara.l2 = 1000;
+	MotionController mC(cartPara);
+	
+	/* open the camera. open the detector. register Detector*/
+	// open caspian
+	std::shared_ptr<ComCaspTest> caspian = std::make_shared<ComCaspTest>();
+	/*caspian->comConnect();
+	caspian->setFocusVoltage(49.8);
+	if (!caspian->getComStatus()) {
+		std::cout << "closedLoopControlTest(): caspian open error!" << std::endl;
+		return;
+	}*/
+	// open camera
+	std::shared_ptr<GxCamTest> GxCamera = std::make_shared<GxCamTest>();
+	//if (!GxCamera->openDevice()) {
+	//	std::cout << "closedLoopControlTest(): GxCamera open error!" << std::endl;
+	//	return;
+	//}
+	//GxCamera->startSnap(); // GxHandler.imgFlow starts to update.
+	//std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+	// register Detector
+	Detector monitor(caspian, GxCamera);
 
-	int maxSimTime = 20;
-	for (int i = 0; i <= cartTest.communFreq*maxSimTime; i++)
-	{
-		Eigen::Vector2d wheelsVeli = mC.fromCartVel2WheelsVel2();
-		mC.updateWheelsVel(wheelsVeli);
-		Eigen::Vector3d cartAcci = mC.fromWheelsVel2CartVel3();
-		Eigen::Vector3d cartPosNi;
-		Eigen::Vector3d cartPosi = mC.getCartCurrPos();
-		cartPosNi << cartAcci(0) / cartTest.communFreq + cartPosi(0),
-			cartAcci(1) / cartTest.communFreq + cartPosi(1),
-			cartAcci(2) / cartTest.communFreq + cartPosi(2);
-		mC.updateCartCurrPos(cartPosNi);
+	/* register trocar, trolley planeand collid plane. */
+	// register trocar. needs to be done...
+	mC.registerTrocar();
+	// register collide plane
+	std::vector<cv::Point3f> collidePlane;
+	collidePlane.emplace_back(cv::Point3f(0, 0, 1200));
+	collidePlane.emplace_back(cv::Point3f(0, 2000, 1200));
+	collidePlane.emplace_back(cv::Point3f(-1000, 0, 1000.0));
+	//collidePlane = monitor.registerPlane();
+	mC.registerCollidePlane(collidePlane);
+	// register trolley plane
+	std::vector<cv::Point3f> motionPlane;
+	motionPlane.emplace_back(cv::Point3f(1, 0, 1));
+	motionPlane.emplace_back(cv::Point3f(1, 0, 2));
+	motionPlane.emplace_back(cv::Point3f(0, 0, 3));
+	//motionPlane = monitor.registerPlane();
+	mC.registerTrolleyPlane(motionPlane);
+	mC.updateTarPos();
+	//mC.updateCartCurrPos(mC.getTarPos());  // test...
 
-		outfile << cartPosi(0) << '\t' << cartPosi(1) << '\t' << cartPosi(2) << '\n';
-	}
-	outfile.close();
-}
+	/* generate roadSign*/
+	// detect trolley
+	bool coarseSuccess = false;
+	//while (!coarseSuccess) {
+	//	coarseSuccess = monitor.coarseToFine(46.8, 50.9);
+	//}
+	//std::cout << "coarseToFine Success!" << std::endl;
+	bool trackSuccess = false;
+	//while (!trackSuccess) {
+	//	trackSuccess = monitor.estimatePose(true); // true: first estimate.
+	//}
+	// road sign
+	pose3d initial_pose;
+	initial_pose.tvec = cv::Vec3d(1500, 0, 5000);
+	initial_pose.rvec = cv::Vec3d(2.5, 0, -1.5);
+	mC.registerCartIniPos(initial_pose);  // test.....
+	//mC.registerCartIniPos(monitor.getPose());
+	mC.pathGenerator();  // pathRaw has been selected to be the roadSign.
+	//std::vector<Eigen::Vector2d> pathRaw = mC.getRoadSign();
+	std::vector<Eigen::Vector2d> factualPath = mC.fromDesired2FactualPath();
+	mC.updateImg(factualPath);
 
-// from initial position to the target point.
-void closedLoopControl()
-{
-	CartPara cartTest;
-	cartTest.wheelsRadius = 0.15;
-	cartTest.wheelsDistance = 0.4;
-	cartTest.linVelLim = 1.2;
-	cartTest.linAccLim = 0.6;
-	cartTest.angVelLim = 1.5;
-	cartTest.angAccLim = 0.8;
-	cartTest.communFreq = 10;
+	/* control loop*/
+	double disThresh = 10; // 10mm
+	int dpSign = 1; // desiredPath sign post (from 0-19).
+	//Eigen::Vector2d tarPosi(pathRaw.at(dpSign)[0], pathRaw.at(dpSign)[1]);
+	Eigen::Vector3d cartPosi(mC.getCartCurrPos());
+	pose3d cartPosRaw;
+	Eigen::Vector2d cartVeli(Eigen::Vector2d::Zero());
+	Eigen::Vector2d wheelsVeli(Eigen::Vector2d::Zero());
+	Eigen::Vector3d cartVel3i(Eigen::Vector3d::Zero());
+	// while doesn't reach the target position.
+	//while ( pow(cartPosi(0) - pathRaw.at(pathRaw.size()-1)[0], 2) + pow(cartPosi(1) - pathRaw.at(pathRaw.size()-1)[1], 2) > disThresh * disThresh) {
+	//	// track another capturedImg and update cartPosi.
+	//	trackSuccess = monitor.estimatePose();
+	//	if (trackSuccess) {
+	//		std::cout << "trackNextCaptured success!" << std::endl;
+	//	}
+	//	else {
+	//		std::cout << "trackNextCaptured failed!" << std::endl;
+	//		while (!trackSuccess) {
+	//			trackSuccess = monitor.estimatePose(true);
+	//		}
+	//	}
+	//	cartPosRaw = monitor.getPose();
+	//	mC.updateCartCurrPos(cartPosRaw);  // used for imgshow.
+	//	cartPosi = mC.getCartCurrPos();
 
-	MotionController mC(cartTest);
-	Eigen::Vector3d cartIniPos(1, 0, 0);
-	mC.updateCartIniPos(cartIniPos);
-	Eigen::Vector3d tarPos(5, 4, 0);
-	mC.updateTarPos(tarPos);
+	//	
+	//	// update tarPosi when get close to the previous one.
+	//	double disErr = sqrt(pow(cartPosi(0) - tarPosi(0), 2) + pow(cartPosi(1) - tarPosi(1), 2));
+	//	if (dpSign < (pathRaw.size()-1)) {  // < 19
+	//		double preErr = sqrt(pow(cartPosi(0) - pathRaw.at(dpSign - 1)[0], 2) + pow(cartPosi(1) - pathRaw.at(dpSign - 1)[1], 2));
+	//		/*parameter 0.5 needs to be adjusted.*/
+	//		if (preErr > disErr)
+	//		{
+	//			//roadSign.emplace_back(Eigen::Vector2d(cartPosi(0), cartPosi(1)));
+	//			dpSign++;
+	//			tarPosi = pathRaw.at(dpSign);  // update tarPosi.
+	//			disErr = sqrt(pow(cartPosi(0) - tarPosi(0), 2) + pow(cartPosi(1) - tarPosi(1), 2));
+	//			//std::cout << cartPosi(0) << cartPosi(1) << std::endl;
+	//		}
+	//	}
+	//	double angErr = atan2(tarPosi(1) - cartPosi(1), tarPosi(0) - cartPosi(0)) - cartPosi(2);
+	//	if (angErr > EIGEN_PI) {
+	//		angErr -= 2 * EIGEN_PI;
+	//	}
+	//	else if (angErr < -EIGEN_PI) {
+	//		angErr += 2 * EIGEN_PI;
+	//	}
 
-	std::ofstream outfile; // log the "closed loop control test data".
-	outfile.open("cLCData.txt", std::ios::trunc | std::ios::out);
+	//	// comute next velocity.
+	//	/* kp=1*/
+	//	Eigen::Vector2d cartVelNi((std::min)({ disErr, cartPara.linVelLim }),
+	//		fabs(angErr) > cartPara.angVelLim ? cartPara.angVelLim * angErr / fabs(angErr) : angErr);
+	//	if ((cartVelNi(0) - cartVeli(0)) * cartPara.communFreq > cartPara.linAccLim)
+	//		cartVelNi(0) = cartVeli(0) + cartPara.linAccLim / cartPara.communFreq;
+	//	else if ((cartVelNi(0) - cartVeli(0)) * cartPara.communFreq < -cartPara.linAccLim)
+	//		cartVelNi(0) = cartVeli(0) - cartPara.linAccLim / cartPara.communFreq;
+	//	if ((cartVelNi(1) - cartVeli(1)) * cartPara.communFreq > cartPara.angAccLim)
+	//		cartVelNi(1) = cartVeli(1) + cartPara.angAccLim / cartPara.communFreq;
+	//	else if ((cartVelNi(1) - cartVeli(1)) * cartPara.communFreq < -cartPara.angAccLim)
+	//		cartVelNi(1) = cartVeli(1) - cartPara.angAccLim / cartPara.communFreq;
+	//	cartVeli = cartVelNi;
+	//	wheelsVeli = mC.fromCartVel2WheelsVel2(cartVeli);
 
-	double disThresh = 0.05;
-	int maxSimTime = 100;
-	for (int i = 0; i <= cartTest.communFreq*maxSimTime; i++)
-	{
-		Eigen::Vector3d cartPosi = mC.getCartCurrPos();
-		double disErr = sqrt(pow(cartPosi(0) - tarPos(0), 2) + pow(cartPosi(1) - tarPos(1), 2));
-		if (disErr < disThresh) { break; }; // if it's close enough, break.
-		double angErr = atan2(tarPos(1) - cartPosi(1), tarPos(0) - cartPosi(0)) - cartPosi(2);
-		if (angErr > EIGEN_PI)
-			angErr -= 2 * EIGEN_PI;
-		else if (angErr < -EIGEN_PI)
-			angErr += 2 * EIGEN_PI;
-		
-		// compute next position and orientation from information at time i.
-		Eigen::Vector2d cartVeli = mC.getCartCurrVel();
-		Eigen::Vector2d wheelsVeli = mC.fromCartVel2WheelsVel2();
-		mC.updateWheelsVel(wheelsVeli);
-		Eigen::Vector3d cartAcci = mC.fromWheelsVel2CartVel3();
-		Eigen::Vector3d cartPosNi;
-		cartPosNi << cartAcci(0) / cartTest.communFreq + cartPosi(0),
-			cartAcci(1) / cartTest.communFreq + cartPosi(1),
-			cartAcci(2) / cartTest.communFreq + cartPosi(2);
-		mC.updateCartCurrPos(cartPosNi);
+	//	// send wheelsVeli
 
-		// compute next velocity.
-		Eigen::Vector2d cartVelNi(std::min(disErr, cartTest.linVelLim), fabs(angErr)>cartTest.angVelLim ? cartTest.angVelLim*angErr / fabs(angErr) : angErr);
-		if ((cartVelNi(0) - cartVeli(0)) * cartTest.communFreq > cartTest.linAccLim)
-			cartVelNi(0) = cartVeli(0) + cartTest.linAccLim / cartTest.communFreq;
-		else if ((cartVelNi(0) - cartVeli(0)) * cartTest.communFreq < -cartTest.linAccLim)
-			cartVelNi(0) = cartVeli(0) - cartTest.linAccLim / cartTest.communFreq;
-		if ((cartVelNi(1) - cartVeli(1)) * cartTest.communFreq > cartTest.angAccLim)
-			cartVelNi(1) = cartVeli(1) + cartTest.angAccLim / cartTest.communFreq;
-		else if ((cartVelNi(1) - cartVeli(1)) * cartTest.communFreq < -cartTest.angAccLim)
-			cartVelNi(1) = cartVeli(1) - cartTest.angAccLim / cartTest.communFreq;
-		mC.updateCartCurrVel(cartVelNi);
-		wheelsVeli = mC.fromCartVel2WheelsVel2();
-		mC.updateWheelsVel(wheelsVeli);
 
-		outfile << cartPosi(0) << '\t' << cartPosi(1) << '\t' << cartPosi(2)
-			<< '\t' << cartVeli(0) << '\t' << cartVeli(1) <<'\n';
-	}
-	outfile.close();
-}
 
-MatrixPath pathGenerator(const Eigen::Vector3d& initPose, const Eigen::Vector3d& finalPose)
-{
-	Eigen::Matrix<double, 2, 3> parabolic(Eigen::Matrix<double, 2, 3>::Zero()); // order: p, h, k
-	parabolic(0, 0) = initPose(1) * initPose(1) / 4 / (initPose(0) - initPose(1) / tan(finalPose(2)));
-	parabolic(0, 1) = -parabolic(0, 0) / tan(finalPose(2)) / tan(finalPose(2));
-	parabolic(0, 2) = -2 * parabolic(0, 0) / tan(finalPose(2));
-	parabolic(1, 0) = initPose(0) * initPose(0) / 4 / (initPose(1) - initPose(0)*tan(finalPose(2)));
-	parabolic(1, 1) = -2 * parabolic(1, 0)*tan(finalPose(2));
-	parabolic(1, 2) = -parabolic(1, 0)*tan(finalPose(2))*tan(finalPose(2));
 
-	const int angleNum=13;
-	Eigen::VectorXd initOri(angleNum);
-	initOri << initPose(2) - 60 * EIGEN_PI / 180, initPose(2) - 50 * EIGEN_PI / 180, initPose(2) - 40 * EIGEN_PI / 180,
-		initPose(2) - 30 * EIGEN_PI / 180, initPose(2) - 20 * EIGEN_PI / 180, initPose(2) - 10 * EIGEN_PI / 180,
-		initPose(2) - 0 * EIGEN_PI / 180, initPose(2) + 10 * EIGEN_PI / 180, initPose(2) + 20 * EIGEN_PI / 180,
-		initPose(2) + 30 * EIGEN_PI / 180, initPose(2) + 40 * EIGEN_PI / 180, initPose(2) + 50 * EIGEN_PI / 180,
-		initPose(2) + 60 * EIGEN_PI / 180;
-	Eigen::MatrixXd cubic1(angleNum, 4);
-	Eigen::MatrixXd cubic2(angleNum, 4);
-	Eigen::VectorXi cubic1State(angleNum); // 0: good; 1: sigular; 2:wrong direction.
-	Eigen::VectorXi cubic2State(angleNum);
-	cubic1State = Eigen::Matrix<int, angleNum, 1>::Zero();
-	cubic2State = Eigen::Matrix<int, angleNum, 1>::Zero();
-	for (int i = 0; i < angleNum; i++)
-	{
-		if (fabs(initOri(i) - EIGEN_PI / 2) < 0.001 || fabs(initOri(i) + EIGEN_PI / 2) < 0.001 || fabs(initPose(0)) < 0.001) // other criterions are discussed later.
-			cubic1State(i) = 1;
-		cubic1(i, 0) = 0;
-		cubic1(i, 1) = tan(finalPose(2));
-		cubic1(i, 2) = (3 * initPose(1) - initPose(0)*(tan(initOri(i)) + 2 * tan(finalPose(2)))) / initPose(0) / initPose(0);
-		cubic1(i, 3) = (initPose(0)*(tan(initOri(i)) + tan(finalPose(2))) - 2 * initPose(1)) / initPose(0) / initPose(0) / initPose(0);
-		if (fabs(initOri(i)) < 0.001 || fabs(fabs(initOri(i)) - EIGEN_PI) < 0.001 || fabs(initPose(1)) < 0.001)
-			cubic2State(i) = 1;
-		cubic2(i, 0) = 0;
-		cubic2(i, 1) = 1 / tan(finalPose(2));
-		cubic2(i, 2) = (3 * initPose(0) - initPose(1)*(1 / tan(initOri(i)) + 2 / tan(finalPose(2)))) / initPose(1) / initPose(1);
-		cubic2(i, 3) = (initPose(1)*(1 / tan(initOri(i)) + 1 / tan(finalPose(2))) - 2 * initPose(0)) / initPose(1) / initPose(1) / initPose(1);
-	}
 
-	MatrixPath pathOut;
-	int pathId = 12;
-
-	for (int i = 0; i < 20; i++)
-	{
-		double z2 = initPose(1) / 2 * (1 + cos(EIGEN_PI*i / 19));
-		pathOut(i, 1) = z2;
-		pathOut(i, 0) = (z2 - parabolic(0, 2))*(z2 - parabolic(0, 2)) / 4 / parabolic(0, 0) + parabolic(0, 1);
-	}
-
-	//for (int i = 0; i < 20; i++)
-	//{
-	//	double z1 = initPose(0) / 2 * (1 + cos(EIGEN_PI*i / 19));
-	//	pathOut(i, 0) = z1;
-	//	pathOut(i, 1) = (z1 - parabolic(1, 1))*(z1 - parabolic(1, 1)) / 4 / parabolic(1, 0) + parabolic(1, 2);
+	//	int ch;
+	//	if (_kbhit()) {  // if any key is pressed, _kbhit() = true.
+	//		ch = _getch();  // get keyboard value
+	//		if (ch == 27) { break; }  // 27: esc
+	//	}
 	//}
 
-	//for (int i = 0; i < 20; i++)
-	//{
-	//	double z1 = initPose(0) / 2 * (1 + cos(EIGEN_PI*i / 19));
-	//	pathOut(i, 0) = z1;
-	//	pathOut(i, 1) = cubic1(pathId, 0) + cubic1(pathId, 1)*z1 + cubic1(pathId, 2)*z1*z1 + cubic1(pathId, 3)*z1*z1*z1;
-	//}
 
-	//for (int i = 0; i < 20; i++)
-	//{
-	//	double z2 = initPose(1) / 2 * (1 + cos(EIGEN_PI*i / 19));
-	//	pathOut(i, 1) = z2;
-	//	pathOut(i, 0) = cubic2(pathId, 0) + cubic2(pathId, 1)*z2 + cubic2(pathId, 2)*z2*z2 + cubic2(pathId, 3)*z2*z2*z2;
-	//}
-	return pathOut;
+	/* close caspian and camera.*/ 
+	caspian->comClose();
+	GxCamera->stopSnap();
+	GxCamera->closeDevice();
+
 }
 
+/* focal voltage control test.*/
 void comCaspLensTest()
 {
 	// ComCaspTest
@@ -209,11 +214,11 @@ void comCaspLensTest()
 	ComCaspTest casp1;
 	casp1.comConnect();
 	casp1.setFocusVoltage(60);
-	
+
 	double caspFocus = 0;
 	while (true)
 	{
-		if (_kbhit()){
+		if (_kbhit()) {
 			ch = _getch();
 			std::cout << ch << std::endl;
 			if (ch == 113) // q = caspFocus ++
@@ -230,7 +235,7 @@ void comCaspLensTest()
 				caspFocus--;
 				if (caspFocus >= 25) { casp1.setFocusVoltage(caspFocus); }
 			}
-			else if (ch == 27){ break; }
+			else if (ch == 27) { break; }
 		}
 	}
 
@@ -239,75 +244,36 @@ void comCaspLensTest()
 	return;
 }
 
-void fromDesired2FactualTest()
-{
-	Eigen::Vector3d cartIniPos(-1000, 1500, 0);
-	Eigen::Vector3d tarPos(0, 0, -80 * EIGEN_PI / 180);
-	MatrixPath desiredPath = pathGenerator(cartIniPos, tarPos);
-	//std::cout << desiredPath << std::endl;
-	CartPara cartTest;
-	cartTest.wheelsRadius = 50; // r=50mm
-	cartTest.wheelsDistance = 560; // l=560mm
-	cartTest.linVelLim = 50; // vlim=50mm/s
-	cartTest.linAccLim = 20; // alim=20mm/s^2
-	cartTest.angVelLim = 0.1; // theta'=0.1rad/s
-	cartTest.angAccLim = 0.04; // theta''=0.04rad/s^2
-	cartTest.communFreq = 10; // 10Hz
-	MotionController mC(cartTest);
-	/*MatrixPath desiredPath;
-	desiredPath << 0, 0,
-	1, 0,
-	2, 0,
-	3, 0,
-	4, 0,
-	5, 0,
-	6, 0,
-	7, 0,
-	7, 1,
-	7, 2,
-	7, 3,
-	7, 4,
-	7, 5,
-	8, 5,
-	9, 5,
-	10, 5,
-	11, 5,
-	12, 5,
-	13, 5,
-	14, 5;*/
-	MatrixPath factualPath = mC.fromDesired2FactualPath(desiredPath, cartIniPos, tarPos);
-	return;
-}
 
 void captureImage() {
 
 	// open caspian
 	ComCaspTest casp1;
 	casp1.comConnect();
-	
+
 	// open camera
 	GxCamTest GxHandler;
 	if (!GxHandler.openDevice()) {
 		return;
 	}
 	GxHandler.startSnap(); // GxHandler.imgFlow starts to update.
-	
+
 	casp1.setFocusVoltage(55);
-	Sleep(500);
+	std::this_thread::sleep_for(std::chrono::milliseconds(500));
 	GxHandler.setCheckSaveBmp();
-	
+
 	int ch;
 	while (true)
 	{
 		if (_kbhit()) {
 			ch = _getch();
-			if (ch==113) { // q
+			if (ch == 113) { // q
 				casp1.setFocusVoltage(60);
-				Sleep(80);
+				std::this_thread::sleep_for(std::chrono::milliseconds(80));
 				GxHandler.setCheckSaveBmp();
 			}
 			else if (ch == 27) { // esc
-				break; 
+				break;
 			}
 		}
 	}
@@ -319,52 +285,78 @@ void captureImage() {
 	return;
 }
 
+
 void markerDetectAndFollow() {
 
-	// registe Detector
-	Detector monitor;
-	if (!monitor.getInitStatus()) {
-		std::cout << "fail to registe Detector!" << std::endl;
+	// open caspian
+	std::shared_ptr<ComCaspTest> caspian = std::make_shared<ComCaspTest>();
+	caspian->comConnect();
+	caspian->setFocusVoltage(49.8);
+	if (!caspian->getComStatus()) {
+		std::cout << "markerDetectAndFollor(): caspian open error!" << std::endl;
 		return;
 	}
-	else {
-		std::cout << "monitor successfully connected!" << std::endl;
+
+	// open camera
+	std::shared_ptr<GxCamTest> GxCamera = std::make_shared<GxCamTest>();
+	if (!GxCamera->openDevice()) {
+		std::cout << "markerDetectAndFollor(): GxCamera open error!" << std::endl;
+		return;
 	}
+	GxCamera->startSnap(); // GxHandler.imgFlow starts to update.
+	std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+
+	// registe Detector
+	Detector monitor(caspian, GxCamera);
 
 	// from coarse to fine. get the best focal voltage.
-	//bool coarseSuccess = false;
-	//while (!coarseSuccess) {
-	//	coarseSuccess = monitor.coarseToFine();
-	//}
-	//std::cout << "coarseToFine Success!" << std::endl;
-
+	bool coarseSuccess = false;
+	while (!coarseSuccess) {
+		coarseSuccess = monitor.coarseToFine(46.8, 50.9);
+	}
+	std::cout << "coarseToFine Success!" << std::endl;
+	
+	/*std::cout << caspian->getFocusVoltage() << std::endl;
+	cv::Mat imgT(GxCamera->getImgFlow());
+	cv::imwrite("324.bmp", imgT);*/
 	// pose estimate
-	bool trackSuccess = false;
-	while (!trackSuccess) {
-		trackSuccess = monitor.estimatePose(true); // first estimate.
-	}
-	while (true) {
-		// get another capturedImg
-		trackSuccess = monitor.estimatePose();
+	//bool trackSuccess = false;
+	//while (!trackSuccess) {
+	//	trackSuccess = monitor.estimatePose(true); // first estimate.
+	//}
+	//while (true) {
+	//	// get another capturedImg
+	//	trackSuccess = monitor.estimatePose();
 
-		if (trackSuccess) {
-			std::cout << "trackNextCaptured success!" << std::endl;
-		}
-		else {
-			std::cout << "trackNextCaptured failed!" << std::endl;
-			while (!trackSuccess) {
-				trackSuccess = monitor.estimatePose(true);
-			}
-		}
+	//	if (trackSuccess) {
+	//		std::cout << "trackNextCaptured success!" << std::endl;
+	//	}
+	//	else {
+	//		std::cout << "trackNextCaptured failed!" << std::endl;
+	//		while (!trackSuccess) {
+	//			trackSuccess = monitor.estimatePose(true);
+	//		}
+	//	}
 
-		int ch;
-		if (_kbhit()) { // if any key is pressed, _kbhit() = true.
-			ch = _getch(); // get keyboard value
-			if (ch == 27) { break; } // 27: esc
-		}
-	}
+	//	int ch;
+	//	if (_kbhit()) { // if any key is pressed, _kbhit() = true.
+	//		ch = _getch(); // get keyboard value
+	//		if (ch == 27) { break; } // 27: esc
+	//	}
+	//}
+
+
+
+	// close caspian
+	caspian->comClose();
+
+	// close camera
+	GxCamera->stopSnap();
+	GxCamera->closeDevice();
+
 	return;
 }
+
 
 float sharpnessSingleImg(cv::Mat imgIn) {
 	float sharpness = 0;
@@ -432,7 +424,7 @@ void sharpnessTest() {
 			if (ch == 97) { // a
 				for (focusVoltage = 52; focusVoltage > 50; focusVoltage -= 0.1) {
 					casp1.setFocusVoltage(focusVoltage);
-					Sleep(200);
+					std::this_thread::sleep_for(std::chrono::milliseconds(200));
 					cv::Mat imgTemp(GxHandler.getImgFlow());
 					cv::imwrite(std::to_string(focusVoltage) + ".bmp", imgTemp);
 					sharpness = sharpnessSingleImg(imgTemp);
@@ -588,8 +580,8 @@ std::vector<std::vector<cv::Point2f>> subPixelCorners(const std::vector<std::vec
 						b += gxy;
 						c += gyy;
 						// p_i position.
-						double px = static_cast<double>(j - HalfW);
-						double py = static_cast<double>(i - HalfH);
+						double px = static_cast<double>(j) - HalfW;
+						double py = static_cast<double>(i) - HalfH;
 
 						bb1 += gxx * px + gxy * py;
 						bb2 += gxy * px + gyy * py;
@@ -636,9 +628,9 @@ void relativePoseEstimate() {
 	std::vector<int> estimateIds = { 1,3,4,5,7 };
 
 	cv::Mat imageCopy;
-	std::string prefix="E:\\sjtu\\autoPark\\code\\calibrate\\relativePoseEstimate\\5marker\\";
+	std::string prefix = "E:\\sjtu\\autoPark\\code\\calibrate\\relativePoseEstimate\\5marker\\";
 	std::ofstream ofs; // 5n X 6.
-	ofs.open(prefix+"relativePoseEstimate.txt", std::ios::out);
+	ofs.open(prefix + "relativePoseEstimate.txt", std::ios::out);
 	for (int imgName = 0; imgName < 280; imgName++) {
 		std::string imgStr = prefix + std::to_string(imgName) + ".bmp";
 		std::string imgStrOut = prefix + std::to_string(imgName) + "_.bmp";
@@ -663,7 +655,7 @@ void relativePoseEstimate() {
 		auto first = markersIdRaw.begin();
 		auto ff = markersCornersRaw.begin();
 		while (first != markersIdRaw.end()) {
-			bool unique=true;
+			bool unique = true;
 			auto second = first + 1;
 			auto ss = ff + 1;
 			while (second != markersIdRaw.end()) {
@@ -697,8 +689,8 @@ void relativePoseEstimate() {
 		cv::aruco::drawDetectedMarkers(imageCopy, markersCorners, markersId); // draw the results
 		std::vector<cv::Vec3d> rvecs, tvecs;
 
-		cv::aruco::estimatePoseSingleMarkers(markersCorners, markerSize/1000, cameraMatrix, distCoeffs, rvecs, tvecs); //求解旋转矩阵rvecs和平移矩阵tvecs
-		std::cout<<"R :"<<rvecs[0]<< std::endl;
+		cv::aruco::estimatePoseSingleMarkers(markersCorners, markerSize / 1000, cameraMatrix, distCoeffs, rvecs, tvecs); //求解旋转矩阵rvecs和平移矩阵tvecs
+		std::cout << "R :" << rvecs[0] << std::endl;
 		std::cout << "T :" << tvecs[0] << std::endl;
 
 		for (int i = 0; i < estimateIds.size(); i++) {
@@ -717,7 +709,7 @@ void relativePoseEstimate() {
 		// draw axis for each marker
 		for (int i = 0; i < markersId.size(); i++)
 			cv::aruco::drawAxis(imageCopy, cameraMatrix, distCoeffs, rvecs[i], tvecs[i], 0.1);
-		
+
 
 		cv::resize(imageCopy, imageCopy, cv::Size(), 0.3, 0.3);
 		cv::imwrite(imgStrOut, imageCopy);
@@ -745,7 +737,7 @@ void poseEstimateTest() {
 
 	//casp1.setFocusVoltage(46.5); // 标定用的镜头电压
 	//Sleep(200);
-	
+
 	cv::Mat imageCaptured;
 	//std::ofstream ofs;
 	std::string prefix = "E:\\sjtu\\autoPark\\code\\autoPark\\autoPark\\poseEstimate\\";
@@ -852,18 +844,21 @@ void poseEstimateTest() {
 
 int main()
 {
-
 	if (!loadConfig())
 		return -1;
 
+	//forwardControlTest();
+	closedLoopControlTest();
 	//comCaspLensTest();
 	//testCornerDetect();
 
 	//captureImage();
 
+
 	//sharpnessTest();
 
-	markerDetectAndFollow();
+	
+	//markerDetectAndFollow();
 	//cv::Mat imgOrigin;
 	//imgOrigin = cv::imread("E:\\projects\\Project1\\Project1\\46.7.jpg");
 	//cv::Mat imgCopy(imgOrigin, cv::Rect(10, 10, ceil(imgOrigin.cols/2), ceil(imgOrigin.rows/2)));
@@ -873,9 +868,9 @@ int main()
 
 	//relativePoseEstimate();
 
-	
+
 	//poseEstimateTest();
-	
+
 
 	//cv::Mat imageCaptured = cv::imread("E:\\sjtu\\autoPark\\code\\0.bmp");
 	//cv::Ptr<cv::aruco::Dictionary> dictionary = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);

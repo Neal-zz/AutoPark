@@ -5,69 +5,42 @@ float focalRange[2] = { 48.9, 50.9 }; // applied voltage, search range for troll
 //float coarseStepSize = 0.5; // coarse search step.
 float fineStepSize = 0.1; // fine search step.
 int maxFalseCount = 3; // used in bilateralSearch to determine whether trackAruco1 successfully.
-int coarseSleepTime = 200;
-int fineSleepTime = 100;
+int coarseSleepTime = 400;
+int fineSleepTime = 200;
 int imgWidth = 2448;
 int imgHeight = 2048;
 
-Detector::Detector() //	: accurateFocalVoltage((focalRange[0]+ focalRange[1])/2)
-	: rvec({ 0.0,0.0,0.0 })
-	, tvec({ 0.0,0.0,0.0 })
-	, strFilePath("E:\\sjtu\\autoPark\\code\\autoPark\\autoPark\\poseEstimate\\")
+Detector::Detector(std::shared_ptr<ComCaspTest> caspian, std::shared_ptr<GxCamTest> GxCamera) //	: accurateFocalVoltage((focalRange[0]+ focalRange[1])/2)
+	: strFilePath("E:\\sjtu\\autoPark\\code\\autoPark\\autoPark\\poseEstimate\\")
+	, aruco1(ArucoContainer())
+	, caspHandler(caspian)
+	, GxHandler(GxCamera)
 {
+	markerPose.rvec = { 0.0,0.0,0.0 };
+	markerPose.tvec = { 0.0,0.0,0.0 };
+
 	capturedImg.create(imgHeight, imgWidth, CV_8UC1);
 	//capturedImg = cv::imread("E:\\sjtu\\autoPark\\code\\calibrate\\accuracyTest\\4m\\15.bmp", CV_8UC1);
-	aruco1 = ArucoContainer();
 
-	initStatus = true;
-
-	// open caspian
-	casp.comConnect();
-	casp.setFocusVoltage(49.8);
-	if (!casp.getComStatus()) {
-		initStatus = false;
-	}
-
-	// open camera
-	if (!GxHandler.openDevice()) {
-		initStatus = false;
-	}
-	else {
-		GxHandler.startSnap(); // GxHandler.imgFlow starts to update.
-	}
-
-	Sleep(1000); // wait for camera ready.
 }
 
-Detector::~Detector()
-{
-	// close caspian
-	casp.comClose();
-
-	// close camera
-	GxHandler.stopSnap();
-	GxHandler.closeDevice();
-}
-
-bool Detector::coarseToFine()
-{
+bool Detector::coarseToFine(const float& searchFVMin, const float& searchFVMax) {
+	
+	// set FV = middle value.
+	int localBestFVTemp = static_cast<int>((searchFVMin + searchFVMax) * 5);
+	float localBestFV = static_cast<int>(localBestFVTemp) / 10.0;
+	caspHandler->setFocusVoltage(localBestFV);
+	std::this_thread::sleep_for(std::chrono::milliseconds(coarseSleepTime));  // wait until focus ready.
+	
 	// find max aruco 
-	float LocalBestFV = (focalRange[0] + focalRange[1]) / 2;
-	casp.setFocusVoltage(LocalBestFV);
-	Sleep(coarseSleepTime); // wait until focus ready.
-
 	cv::Ptr<cv::aruco::Dictionary> dictionary = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);
 	std::vector<std::vector<cv::Point2f>> markersCorners;
 	std::vector<int> markersId;
 	while (markersId.size() == 0) {
-		updateCapturedImg(GxHandler.getImgFlow());
-		//cv::Mat imgWatch(GxHandler.getImgFlow());
-		//Sleep(100000);
+		updateCapturedImg(GxHandler->getImgFlow());
 		cv::aruco::detectMarkers(capturedImg, dictionary, markersCorners, markersId);
 	}
-	
 	std::cout << "Detector::coarseToFine find marker!" << std::endl;
-
 	float maxArea = 0;
 	int maxId = -1;
 	for (int marker_i = 0; marker_i < markersId.size(); marker_i++) {
@@ -79,49 +52,41 @@ bool Detector::coarseToFine()
 	}
 	aruco1 = ArucoContainer(markersId.at(maxId), markersCorners.at(maxId));
 
-	// coarse bilateral search, fineStepSize 0.1v
-	//float bestFocalVoltage;
-	if (!bilateralSearch(LocalBestFV, fineStepSize, fineSleepTime)) {
+	// fine bilateral search, fineStepSize 0.1v
+	if (!bilateralSearch(localBestFV, fineStepSize, fineSleepTime)) {
 		return false;
 	}
 	std::cout << "Detector::coarseToFine search success!" << std::endl;
 
-	//updateAccurateFV(bestFocalVoltage);
 	return true;
 }
 
 bool Detector::estimatePose(bool firstEstimate) {
-	updateCapturedImg(GxHandler.getImgFlow());
+	updateCapturedImg(GxHandler->getImgFlow());
 
 	// get search region and resize scale.
+	// detect markers.
 	cv::Rect searchRegion;
 	float resizeScale;
+	cv::Mat ROI;
+	cv::Ptr<cv::aruco::Dictionary> dictionary = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);
+	std::vector<std::vector<cv::Point2f>> markersCornersRaw;
+	cv::Ptr<cv::aruco::DetectorParameters> parameters = cv::aruco::DetectorParameters::create();
 	if (firstEstimate == true) {
 		searchRegion = cv::Rect(0, 0, imgWidth, imgHeight);
 		resizeScale = 1.0;
+		ROI = capturedImg.clone();
+		parameters->minMarkerPerimeterRate = 0.1;
+		parameters->maxMarkerPerimeterRate = 0.8;
 	}
 	else {
 		searchRegion = getSearchRegion();
 		resizeScale = ceil(sqrt(150000.0 / searchRegion.area()) * 10.0) / 10.0; // 600 * 250
-	}
-	
-	// resize search region
-	cv::Mat ROI = capturedImg(searchRegion).clone();
-	cv::resize(ROI, ROI, cv::Size(), resizeScale, resizeScale);
-
-	// detect markers
-	cv::Ptr<cv::aruco::Dictionary> dictionary = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);
-	std::vector<std::vector<cv::Point2f>> markersCornersRaw;
-	cv::Ptr<cv::aruco::DetectorParameters> parameters = cv::aruco::DetectorParameters::create();
-	if (ROI.cols < 2000) {
+		ROI = capturedImg(searchRegion);
+		cv::resize(ROI, ROI, cv::Size(), resizeScale, resizeScale);
 		parameters->minMarkerPerimeterRate = 0.2; // the minimum pixel size of a marker, specified relative to the maximum dimension of the input image.
-		parameters->maxMarkerPerimeterRate = 0.8; // the minimum pixel size of a marker...
+		parameters->maxMarkerPerimeterRate = 2; // the minimum pixel size of a marker... // 0.8;
 		parameters->minMarkerDistanceRate = 0.01; // Minimum distance between any pair of corners from two different markers.
-	}
-	else {
-		parameters->minMarkerPerimeterRate = 0.1;
-		parameters->maxMarkerPerimeterRate = 0.8;
-		parameters->minMarkerDistanceRate = 0.01;
 	}
 	std::vector<int> markersIdRaw;
 	cv::aruco::detectMarkers(ROI, dictionary, markersCornersRaw, markersIdRaw, parameters);
@@ -129,11 +94,11 @@ bool Detector::estimatePose(bool firstEstimate) {
 	// if at least one marker detected
 	if (markersIdRaw.size() == 0) {
 		std::cout << "estimatePose() no marker..." << std::endl;
-		saveImage(ROI, "roi");
+		//saveImage(ROI, "roi");
 		return false;
 	}
 
-	// delete outer marker.
+	// two boundaries condition. Delete the outer marker.
 	std::vector<std::vector<cv::Point2f>> markersCornersScaled;
 	std::vector<int> markersId;
 	auto first = markersIdRaw.begin();
@@ -168,8 +133,7 @@ bool Detector::estimatePose(bool firstEstimate) {
 		ff++;
 	}
 	cv::aruco::drawDetectedMarkers(ROI, markersCornersScaled, markersId); // draw the results.
-	saveImage(ROI, "roi");
-	//cv::Mat temp_image = capturedImg;
+	//saveImage(ROI, "roi");
 	ArucoContainers markerCorners;
 	int mCSi = 0;
 	for (const std::vector<cv::Point2f>& mCS : markersCornersScaled) {
@@ -185,6 +149,7 @@ bool Detector::estimatePose(bool firstEstimate) {
 
 	// subpixel location
 	ArucoContainers subpixelMarkers=subPixelCorners(markerCorners);
+	//cv::Mat temp_image = capturedImg;
 
 	// pose estimate
 	std::vector<cv::Point3f> pointsM;
@@ -214,15 +179,18 @@ bool Detector::estimatePose(bool firstEstimate) {
 		}
 	}
 	cv::Vec3d rvecTemp, tvecTemp;
-	cv::solvePnP(pointsM, pointsP, cameraMatrix, distCoeffs, rvecTemp, tvecTemp, false, cv::SOLVEPNP_EPNP); // r and t: Tcam_M
+	if (pointsP.size() > 4) {
+		cv::solvePnP(pointsM, pointsP, cameraMatrix, distCoeffs, rvecTemp, tvecTemp, false, cv::SOLVEPNP_EPNP); // r and t: Tcam_M
+	}
+	else {
+		cv::solvePnP(pointsM, pointsP, cameraMatrix, distCoeffs, rvecTemp, tvecTemp, false, cv::SOLVEPNP_P3P); // r and t: Tcam_M
+	}
 	update_rt(rvecTemp, tvecTemp);
+	showResult(pointsM, pointsP); // draw results
 
 	// update focal voltage and camera parameters.
 	/*float currentBestFV = fromDistance2FV();
 	casp.setFocusVoltage(currentBestFV);*/
-
-	// draw results
-	showResult(pointsM, pointsP);
 
 	return true;
 }
@@ -234,8 +202,8 @@ bool Detector::bilateralSearch(float currentFocalVoltage, float stepSize, int sl
 	int searchDirection = 0;
 	float bestSharpness = 0;
 
-	if (fabs(currentFocalVoltage - casp.getFocusVoltage()) > (0.8 * fineStepSize)) { // min step size is 0.1
-		std::cout << "something went wrong in Detector::bilateralSearch." << std::endl;
+	if (fabs(currentFocalVoltage - caspHandler->getFocusVoltage()) > (0.8 * fineStepSize)) {  // min step size is 0.1
+		std::cout << "something went wrong in Detector::bilateralSearch()." << std::endl;
 		return false;
 	}
 
@@ -243,15 +211,15 @@ bool Detector::bilateralSearch(float currentFocalVoltage, float stepSize, int sl
 	bool trackSuccess = false;
 	int falseCount = 0;
 	float sharpnessM = 0;
-	while (!trackSuccess && falseCount < maxFalseCount) { // falseCount > 3, means track failed
-		updateCapturedImg(GxHandler.getImgFlow());
+	while (!trackSuccess && falseCount < maxFalseCount) {  // falseCount > 3, means track failed
+		updateCapturedImg(GxHandler->getImgFlow());
 		trackSuccess = trackAruco1();
 		if (!trackSuccess) {
 			falseCount++;
 			continue;
 		}
-		casp.setFocusVoltage(currentFocalVoltage + stepSize); // set next focus voltage.
-		Sleep(sleepTime); // Sleep time may be unnecessary? TODO
+		caspHandler->setFocusVoltage(currentFocalVoltage + stepSize);  // set next focus voltage.
+		std::this_thread::sleep_for(std::chrono::milliseconds(sleepTime));  // Sleep time may be unnecessary? TODO
 		sharpnessM = detectSharpness();
 	}
 	if (falseCount >= maxFalseCount) {
@@ -264,14 +232,14 @@ bool Detector::bilateralSearch(float currentFocalVoltage, float stepSize, int sl
 	falseCount = 0;
 	float sharpnessH = 0;
 	while (!trackSuccess && falseCount < maxFalseCount) { // falseCount > 3, means track failed
-		updateCapturedImg(GxHandler.getImgFlow());
+		updateCapturedImg(GxHandler->getImgFlow());
 		trackSuccess = trackAruco1();
 		if (!trackSuccess) {
 			falseCount++;
 			continue;
 		}
-		casp.setFocusVoltage(currentFocalVoltage - stepSize); // set next focus voltage.
-		Sleep(sleepTime); // Sleep time may be unnecessary? TODO
+		caspHandler->setFocusVoltage(currentFocalVoltage - stepSize); // set next focus voltage.
+		std::this_thread::sleep_for(std::chrono::milliseconds(sleepTime));  // Sleep time may be unnecessary? TODO
 		sharpnessH = detectSharpness();
 	}
 	if (falseCount >= maxFalseCount) {
@@ -283,15 +251,15 @@ bool Detector::bilateralSearch(float currentFocalVoltage, float stepSize, int sl
 		searchDirection = 1;
 		bestSharpness = sharpnessH;
 		currentFocalVoltage += stepSize;
-		casp.setFocusVoltage(currentFocalVoltage + stepSize); // set next focus voltage.
-		Sleep(sleepTime); // Sleep time may be unnecessary? TODO
+		caspHandler->setFocusVoltage(currentFocalVoltage + stepSize); // set next focus voltage.
+		std::this_thread::sleep_for(std::chrono::milliseconds(sleepTime));  // Sleep time may be unnecessary? TODO
 	}
 	else { // else search left handside
 		trackSuccess = false;
 		falseCount = 0;
 		float sharpnessL = 0;
 		while (!trackSuccess && falseCount < maxFalseCount) { // falseCount > 3, means track failed
-			updateCapturedImg(GxHandler.getImgFlow());
+			updateCapturedImg(GxHandler->getImgFlow());
 			trackSuccess = trackAruco1();
 			if (!trackSuccess) {
 				falseCount++;
@@ -309,16 +277,16 @@ bool Detector::bilateralSearch(float currentFocalVoltage, float stepSize, int sl
 			searchDirection = -1;
 			bestSharpness = sharpnessL;
 			currentFocalVoltage -= stepSize;
-			casp.setFocusVoltage(currentFocalVoltage - stepSize); // set next focus voltage.
-			Sleep(sleepTime); // Sleep time may be unnecessary? TODO
+			caspHandler->setFocusVoltage(currentFocalVoltage - stepSize); // set next focus voltage.
+			std::this_thread::sleep_for(std::chrono::milliseconds(sleepTime));  // Sleep time may be unnecessary? TODO
 		}
 	}
 
 	// search towards searchDirection, and find the best focal voltage
 	if (searchDirection == 0) {
 		//bestFocalVoltage = currentFocalVoltage;
-		casp.setFocusVoltage(currentFocalVoltage); // set next focus voltage.
-		Sleep(sleepTime); // Sleep time may be unnecessary? TODO
+		caspHandler->setFocusVoltage(currentFocalVoltage); // set next focus voltage.
+		std::this_thread::sleep_for(std::chrono::milliseconds(sleepTime));  // Sleep time may be unnecessary? TODO
 		return true;
 	}
 
@@ -327,14 +295,14 @@ bool Detector::bilateralSearch(float currentFocalVoltage, float stepSize, int sl
 		trackSuccess = false;
 		float currentSharpness = 0;
 		while (!trackSuccess && falseCount < maxFalseCount) { // falseCount > maxFalseCount, means track failed
-			updateCapturedImg(GxHandler.getImgFlow());
+			updateCapturedImg(GxHandler->getImgFlow());
 			trackSuccess = trackAruco1();
 			if (!trackSuccess) {
 				falseCount++;
 				continue;
 			}
-			casp.setFocusVoltage(currentFocalVoltage + 2 * searchDirection * stepSize); // set next focus voltage.
-			Sleep(sleepTime); // Sleep time may be unnecessary? TODO
+			caspHandler->setFocusVoltage(currentFocalVoltage + 2 * searchDirection * stepSize); // set next focus voltage.
+			std::this_thread::sleep_for(std::chrono::milliseconds(sleepTime));  // Sleep time may be unnecessary? TODO
 			currentSharpness = detectSharpness();
 		}
 		if (falseCount >= maxFalseCount) {
@@ -347,8 +315,8 @@ bool Detector::bilateralSearch(float currentFocalVoltage, float stepSize, int sl
 			currentFocalVoltage += searchDirection * stepSize;
 		}
 		else {
-			casp.setFocusVoltage(currentFocalVoltage);
-			Sleep(sleepTime);
+			caspHandler->setFocusVoltage(currentFocalVoltage);
+			std::this_thread::sleep_for(std::chrono::milliseconds(sleepTime));  // Sleep time may be unnecessary? TODO
 			//bestFocalVoltage = currentFocalVoltage;
 			break;
 		}
@@ -368,13 +336,13 @@ bool Detector::trackAruco1()
 	int center_y = center.y / 2;
 	cv::Rect roiRect;
 	for (int iter = 1; iter < 5; iter++) {
-		int halfWidth = std::min({ aruco1.area.width * iter, capturedImg.cols - center_x, center_x });
-		int halfHeight = std::min({ aruco1.area.height * iter, capturedImg.rows - center_y, center_y });
+		int halfWidth = (std::min)({ aruco1.area.width * iter, capturedImg.cols - center_x, center_x });
+		int halfHeight = (std::min)({ aruco1.area.height * iter, capturedImg.rows - center_y, center_y });
 		roiRect = cv::Rect(center_x - halfWidth, center_y - halfHeight, halfWidth * 2, halfHeight * 2);
 
 		std::vector<std::vector<cv::Point2f>> markersCorners;
 		std::vector<int> markersId;
-		cv::Mat imgTemp(capturedImg); // test
+		//cv::Mat imgTemp(capturedImg); // test
 		cv::Mat imgROI(capturedImg, roiRect);
 		cv::aruco::detectMarkers(imgROI, dictionary, markersCorners, markersId);
 		
@@ -422,14 +390,23 @@ float Detector::detectSharpness() const
 	cv::Mat hist;
 	cv::calcHist(&img_sobel, 1, 0, cv::Mat(), hist, 1, &histBinNum, &histRange, true, false);
 
+	// two tyes of sharpness detect algorithm.
 	int pixelNum = 0;
-	for (int i = 95; i < histBinNum; i++) // i represents gradient; 95 = 255/2 * 3/4
+	for (int i = 20; i < histBinNum; i++) // i represents gradient; 95 = 255/2 * 3/4
 	{
 		float bin_val = hist.at<float>(i);
-		sharpness += bin_val * i;
+		sharpness += bin_val *i;
 		pixelNum += bin_val;
 	}
-	sharpness = sharpness / pixelNum;
+	//for (int i = histBinNum - 1; i > 0; i--) {
+	//	float bin_val = hist.at<float>(i);
+	//	sharpness += bin_val * i;
+	//	pixelNum += bin_val;
+	//	if (pixelNum > 500) {
+	//		break;
+	//	}
+	//}
+	sharpness = sharpness / static_cast<float>(pixelNum);
 
 	return sharpness;
 }
@@ -511,10 +488,10 @@ cv::Rect Detector::getSearchRegion() const {
 Eigen::Matrix4f Detector::getTC_M() const {
 	Eigen::Matrix4f TC_M;
 	cv::Mat rotm;
-	cv::Rodrigues(rvec, rotm);
-	TC_M << rotm.at<float>(0, 0), rotm.at<float>(0, 1), rotm.at<float>(0, 2), tvec(0),
-		rotm.at<float>(1, 0), rotm.at<float>(1, 1), rotm.at<float>(1, 2), tvec(1),
-		rotm.at<float>(2, 0), rotm.at<float>(2, 1), rotm.at<float>(2, 2), tvec(2),
+	cv::Rodrigues(markerPose.rvec, rotm);
+	TC_M << rotm.at<float>(0, 0), rotm.at<float>(0, 1), rotm.at<float>(0, 2), markerPose.tvec(0),
+		rotm.at<float>(1, 0), rotm.at<float>(1, 1), rotm.at<float>(1, 2), markerPose.tvec(1),
+		rotm.at<float>(2, 0), rotm.at<float>(2, 1), rotm.at<float>(2, 2), markerPose.tvec(2),
 		0.0, 0.0, 0.0, 1.0;
 	return TC_M;
 }
@@ -522,7 +499,7 @@ Eigen::Matrix4f Detector::getTC_M() const {
 Corners Detector::getReprojectImagePoint(const std::vector<cv::Point3f>& object3DPoints) const {
 	cv::Mat reprojectedPoints;
 	cv::InputArray object3DPoints_x = (cv::InputArray)object3DPoints;
-	cv::projectPoints(object3DPoints, rvec, tvec, cameraMatrix, distCoeffs, reprojectedPoints);
+	cv::projectPoints(object3DPoints, markerPose.rvec, markerPose.tvec, cameraMatrix, distCoeffs, reprojectedPoints);
 
 	Corners corners_res = Corners();
 	size_t n = object3DPoints_x.rows() * object3DPoints_x.cols();
@@ -700,8 +677,8 @@ void Detector::showResult(const std::vector<cv::Point3f>& pointsM, const std::ve
 	}
 
 	std::string str1, str2;
-	str1 = "position [" + std::to_string(tvec[0]) + "," + std::to_string(tvec[1]) + "," + std::to_string(tvec[2]) +
-		"], orientation [" + std::to_string(rvec[0]) + "," + std::to_string(rvec[1]) + "," + std::to_string(rvec[2]) + "]";
+	str1 = "position [" + std::to_string(markerPose.tvec[0]) + "," + std::to_string(markerPose.tvec[1]) + "," + std::to_string(markerPose.tvec[2]) +
+		"], orientation [" + std::to_string(markerPose.rvec[0]) + "," + std::to_string(markerPose.rvec[1]) + "," + std::to_string(markerPose.rvec[2]) + "]";
 	str2 = "cost: " + std::to_string(cost);
 
 	cv::putText(imgResized, str1, cv::Point_<int>(10, 50), cv::FONT_HERSHEY_COMPLEX, text_scale, color_arr[4], 2);
@@ -710,7 +687,7 @@ void Detector::showResult(const std::vector<cv::Point3f>& pointsM, const std::ve
 
 	cv::imshow("repro", imgResized);
 	cv::waitKey(1);
-	saveImage(imgResized, "repro");
+	//saveImage(imgResized, "repro");
 	return;
 }
 
@@ -740,3 +717,119 @@ void Detector::saveImage(const cv::Mat& image, const std::string& strPrefix) con
 	cv::imwrite(fullName, image);
 	return;
 }
+
+std::vector<cv::Point3f> Detector::registerPlane() {
+	/*coares to fine has been achieved.*/
+	std::vector<cv::Point3f> collidePoints;
+	int amount = 50;  // every 200ms, save a result.
+
+	// keep on emplace_back, until enough.
+	while (true) {
+		updateCapturedImg(GxHandler->getImgFlow());
+
+		// detect marker
+		cv::Ptr<cv::aruco::Dictionary> dictionary = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_4X4_50);
+		std::vector<std::vector<cv::Point2f>> markersCornersRaw;
+		cv::Ptr<cv::aruco::DetectorParameters> parameters = cv::aruco::DetectorParameters::create();
+		std::vector<int> markersIdRaw;
+		cv::aruco::detectMarkers(capturedImg, dictionary, markersCornersRaw, markersIdRaw, parameters);
+
+		// if at least one marker detected
+		if (markersIdRaw.size() == 0) {
+			std::cout << "no marker..." << std::endl;
+			continue;
+		}
+		std::vector<std::vector<cv::Point2f>> markersCorners;
+		std::vector<int> markersId;
+		auto first = markersIdRaw.begin();
+		auto ff = markersCornersRaw.begin();
+		while (first != markersIdRaw.end()) {
+			bool unique = true;
+			auto second = first + 1;
+			auto ss = ff + 1;
+			while (second != markersIdRaw.end()) {
+				if (*second == *first) {
+					unique = false;
+					if ((fabs(ff->at(0).x - ff->at(1).x) + fabs(ff->at(0).y - ff->at(3).y)) > (fabs(ss->at(0).x - ss->at(1).x) + fabs(ss->at(0).y - ss->at(3).y))) {
+						markersId.emplace_back(*second);
+						markersCorners.emplace_back(*ss);
+					}
+					else {
+						markersId.emplace_back(*first);
+						markersCorners.emplace_back(*ff);
+					}
+					markersIdRaw.erase(second);
+					markersCornersRaw.erase(ss);
+					break;
+				}
+				second++;
+				ss++;
+			}
+			if (unique) {
+				markersId.emplace_back(*first);
+				markersCorners.emplace_back(*ff);
+			}
+			first++;
+			ff++;
+		}
+
+		ArucoContainers ACsTemp;
+		int mCSi = 0;
+		for (const std::vector<cv::Point2f>& mCS : markersCorners) {
+			std::vector<cv::Point2f > mC;
+			mC.emplace_back(mCS.at(0).x, mCS.at(0).y);
+			mC.emplace_back(mCS.at(1).x, mCS.at(1).y);
+			mC.emplace_back(mCS.at(2).x, mCS.at(2).y);
+			mC.emplace_back(mCS.at(3).x, mCS.at(3).y);
+			ArucoContainer mCTemp(markersId[mCSi], mC);
+			ACsTemp.emplace_back(mCTemp);
+			mCSi++;
+		}
+
+		ArucoContainers Acs = subPixelCorners(ACsTemp); // subpixel location
+
+		//cv::aruco::drawDetectedMarkers(imageCopy, markersCorners, markersId); // draw the results
+		std::vector<cv::Vec3d> rvecs, tvecs;
+		cv::aruco::estimatePoseSingleMarkers(markersCorners, markerSize / 1000, cameraMatrix, distCoeffs, rvecs, tvecs); //求解旋转矩阵rvecs和平移矩阵tvecs
+		//std::cout << "R :" << rvecs[0] << std::endl;
+		//std::cout << "T :" << tvecs[0] << std::endl;
+
+		// emplace_back
+		if (tvecs.size() == 1) {
+			collidePoints.emplace_back(tvecs[0]);
+		}
+		else {
+			continue;
+		}
+
+		// break criteria
+		if (collidePoints.size() > amount) {
+			break;
+		}
+
+	}
+
+	return collidePoints;
+}
+
+//pose3d Detector::detectTrolley() {
+//	if (markerPose.tvec[2] == 0) {
+//		// coarse to fine
+//		bool coarseSuccess = false;
+//		while (!coarseSuccess) {
+//			coarseSuccess = coarseToFine(46.8, 50.9);
+//		}
+//	}
+//	else {
+//		float fv = fromDistance2FV();
+//		caspHandler->setFocusVoltage(fv);
+//	}
+//
+//	bool trackSuccess = false;
+//	while (!trackSuccess) {
+//		trackSuccess = monitor.estimatePose(true); // first estimate.
+//	}
+//
+//
+//
+//}
